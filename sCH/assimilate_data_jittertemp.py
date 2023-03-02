@@ -27,7 +27,7 @@ x, = SpatialCoordinate(model.mesh)
 
 # elliptic problem to have smoother initial conditions in space
 p = TestFunction(model.V)
-q = TrialFunctino(model.V)
+q = TrialFunction(model.V)
 xi = Function(model.V)
 a = inner(grad(p), grad(q))*dx + p*q*dx
 L = p*xi*dx
@@ -64,7 +64,7 @@ if COMM_WORLD.rank == 0:
     y_e = np.zeros((np.sum(nensemble), ys[0], ys[1]))
 
 # do assimiliation step
-for k in range(N_obs):
+for k in range(2):
     PETSc.Sys.Print("Step", k)
     yVOM.dat.data[:] = y[k, :]
     jtfilter.assimilation_step(yVOM, log_likelihood)
@@ -81,4 +81,4 @@ for k in range(N_obs):
             y_e[:, k, m] = y_e_list[m].data()
 
 if COMM_WORLD.rank == 0:
-    np.save("ensemble_simulated_obs.npy", y_e)
+    np.savetxt("ensemble_simulated_obs.txt", y_e)
