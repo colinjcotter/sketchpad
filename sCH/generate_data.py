@@ -4,7 +4,7 @@ from firedrake import *
 from pyop2.mpi import MPI
 from nudging import *
 import numpy as np
-from nudging.models.stochastic_Camassa_Holm import Camsholm
+from stochastic_Camassa_Holm import Camsholm
 
 """
 create some synthetic data/observation data at T_1 ---- T_Nobs
@@ -13,7 +13,7 @@ run model, get obseravation
 add observation noise N(0, sigma^2)
 """
 nsteps = 5
-model = Camsholm(100, nsteps)
+model = Camsholm(100, nsteps, dt=0.1)
 model.setup()
 X_truth = model.allocate()
 _, u0 = X_truth[0].split()

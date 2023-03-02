@@ -65,7 +65,7 @@ if COMM_WORLD.rank == 0:
     y_e = np.zeros((np.sum(nensemble), ys[1]))
 
 # do assimiliation step
-for k in range(2):
+for k in range(N_obs):
     PETSc.Sys.Print("Step", k)
     yVOM.dat.data[:] = y[k, :]
     jtfilter.assimilation_step(yVOM, log_likelihood)
