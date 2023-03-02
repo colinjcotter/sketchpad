@@ -50,7 +50,17 @@ class Camsholm(base_model):
         # stochastic term
         self.dW = Function(self.V)
 
-        # finite element linear functional 
+        # elliptic problem to have smoother noise in space
+        p = TestFunction(self.V)
+        q = TrialFunctino(self.V)
+        self.xi = Function(self.V)
+        a = inner(grad(p), grad(q))*dx + p*q*dx
+        L = p*self.xi*dx
+        dW_prob = LinearVariationalProblem(a, L, self.dW)
+        self.dw_solver = LinearVariationalSolver(dW_prob,
+                                                 solver_parameters={'mat_type': 'aij', 'ksp_type': 'preonly','pc_type': 'lu'})
+        
+        # finite element linear functional
         Dt = Constant(self.dt)
         self.mh = 0.5*(self.m1 + self.m0)
         self.uh = 0.5*(self.u1 + self.u0)
@@ -86,8 +96,8 @@ class Camsholm(base_model):
         self.w0.assign(self.X[0])
         self.msolve.solve()
         for step in range(self.nsteps):
-            self.dW.assign(self.X[step+1])
-
+            self.xi.assign(self.X[step+1])
+            self.dW_solver.solve()
             self.usolver.solve()
             self.w0.assign(self.w1)
         X1[0].assign(self.w0) # save sol at the nstep th time 
