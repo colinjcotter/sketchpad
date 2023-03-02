@@ -38,6 +38,7 @@ dw_solver = LinearVariationalSolver(dW_prob,
 for i in range(nensemble[jtfilter.ensemble_rank]):
     xi.assign(model.rg.uniform(model.V, 0., 1.0))
     dw_solver.solve()
+    print(dW.dat.data[:].max())
     _, u = jtfilter.ensemble[i][0].split()
     u.assign(dW)
 
@@ -61,7 +62,7 @@ for m in range(y.shape[1]):
 
 ys = y.shape
 if COMM_WORLD.rank == 0:
-    y_e = np.zeros((np.sum(nensemble), ys[0], ys[1]))
+    y_e = np.zeros((np.sum(nensemble), ys[1]))
 
 # do assimiliation step
 for k in range(2):
@@ -78,7 +79,7 @@ for k in range(2):
     for m in range(y.shape[1]):
         y_e_list[m].synchronise()
         if COMM_WORLD.rank == 0:
-            y_e[:, k, m] = y_e_list[m].data()
+            y_e[:, m] = y_e_list[m].data()
 
-if COMM_WORLD.rank == 0:
-    np.savetxt("ensemble_simulated_obs.txt", y_e)
+    if COMM_WORLD.rank == 0:
+        np.savetxt("ensemble_simulated_obs"+str(k)+".txt", y_e)
