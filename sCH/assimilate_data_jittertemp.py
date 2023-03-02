@@ -25,17 +25,21 @@ jtfilter.setup(nensemble, model)
 
 x, = SpatialCoordinate(model.mesh) 
 
-#prepare the initial ensemble
+# elliptic problem to have smoother initial conditions in space
+p = TestFunction(model.V)
+q = TrialFunctino(model.V)
+xi = Function(model.V)
+a = inner(grad(p), grad(q))*dx + p*q*dx
+L = p*xi*dx
+dW = Function(model.V)
+dW_prob = LinearVariationalProblem(a, L, dW)
+dw_solver = LinearVariationalSolver(dW_prob,
+                                         solver_parameters={'mat_type': 'aij', 'ksp_type': 'preonly','pc_type': 'lu'})
 for i in range(nensemble[jtfilter.ensemble_rank]):
-    dx0 = model.rg.normal(model.R, 0., 1.0)
-    dx1 = model.rg.normal(model.R, 0., 1.0)
-    a = model.rg.uniform(model.R, 0., 1.0)
-    b = model.rg.uniform(model.R, 0., 1.0)
-    u0_exp = (1+a)*0.2*2/(exp(x-403./15. + dx0) + exp(-x+403./15. + dx0)) \
-        + (1+b)*0.5*2/(exp(x-203./15. + dx1)+exp(-x+203./15. + dx1))
-
+    xi.assign(model.rg.uniform(model.V, 0., 1.0))
+    dw_solver.solve()
     _, u = jtfilter.ensemble[i][0].split()
-    u.interpolate(u0_exp)
+    u.assign(dW)
 
 def log_likelihood(y, Y):
     ll = (y-Y)**2/0.05**2/2*dx
