@@ -28,6 +28,7 @@ y_obs_full = np.zeros((N_obs, np.size(y_true)))
 y_true_full = np.zeros((N_obs, np.size(y_true)))
 
 for i in range(N_obs):
+    print("step", i)
     model.randomize(X_truth)
     model.run(X_truth, X_truth)
     y_true_VOM = model.obs()

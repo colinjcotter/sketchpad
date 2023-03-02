@@ -52,7 +52,7 @@ class Camsholm(base_model):
 
         # elliptic problem to have smoother noise in space
         p = TestFunction(self.V)
-        q = TrialFunctino(self.V)
+        q = TrialFunction(self.V)
         self.xi = Function(self.V)
         a = inner(grad(p), grad(q))*dx + p*q*dx
         L = p*self.xi*dx
@@ -97,7 +97,7 @@ class Camsholm(base_model):
         self.msolve.solve()
         for step in range(self.nsteps):
             self.xi.assign(self.X[step+1])
-            self.dW_solver.solve()
+            self.dw_solver.solve()
             self.usolver.solve()
             self.w0.assign(self.w1)
         X1[0].assign(self.w0) # save sol at the nstep th time 
