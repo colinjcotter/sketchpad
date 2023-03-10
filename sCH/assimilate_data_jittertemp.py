@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from firedrake.petsc import PETSc
 from pyadjoint import AdjFloat
 
-from nudging.models.stochastic_Camassa_Holm import Camsholm
+from stochastic_Camassa_Holm import Camsholm1 as Camsholm
 
 """ read obs from saved file 
     Do assimilation step for tempering and jittering steps 
@@ -25,25 +25,18 @@ jtfilter.setup(nensemble, model)
 
 x, = SpatialCoordinate(model.mesh) 
 
-# elliptic problem to have smoother initial conditions in space
-p = TestFunction(model.V)
-q = TrialFunction(model.V)
-xi = Function(model.V)
-a = inner(grad(p), grad(q))*dx + p*q*dx
-L = p*xi*dx
-dW = Function(model.V)
-dW_prob = LinearVariationalProblem(a, L, dW)
-dw_solver = LinearVariationalSolver(dW_prob,
-                                         solver_parameters={'mat_type': 'aij', 'ksp_type': 'preonly','pc_type': 'lu'})
 for i in range(nensemble[jtfilter.ensemble_rank]):
-    xi.assign(model.rg.uniform(model.V, 0., 1.0))
-    dw_solver.solve()
-    print(dW.dat.data[:].max())
-    _, u = jtfilter.ensemble[i][0].split()
-    u.assign(dW)
+    dx0 = model.rg.normal(model.R, 0., 2.0)
+    dx1 = model.rg.normal(model.R, 0., 2.0)
+    a = model.rg.uniform(model.R, 0.5, 1.5)
+    b = model.rg.uniform(model.R, 0.5, 1.5)
+    u0_exp = a*0.2*2/(exp(x-403./15. - dx0) + exp(-x+403./15. + dx0)) \
+        + b*0.5*2/(exp(x-203./15. - dx1)+exp(-x+203./15. + dx1))
+    _, u = jtfilter.ensemble[i][0].subfunctions
+    u.interpolate(u0_exp)
 
 def log_likelihood(y, Y):
-    ll = (y-Y)**2/0.05**2/2*dx
+    ll = (y-Y)**2/0.5**2/2*dx
     return ll
     
 #Load data
@@ -62,10 +55,26 @@ for m in range(y.shape[1]):
 
 ys = y.shape
 if COMM_WORLD.rank == 0:
-    y_e = np.zeros((np.sum(nensemble), ys[1]))
+    y_e = np.zeros((np.sum(nensemble), ys[1]+1))
 
+# initial data plots
+for i in range(nensemble[jtfilter.ensemble_rank]):
+    model.w0.assign(jtfilter.ensemble[i][0])
+    obsdata = model.obs().dat.data[:]
+    for m in range(y.shape[1]):
+        y_e_list[m].dlocal[i] = obsdata[m]
+
+for m in range(y.shape[1]):
+    y_e_list[m].synchronise()
+    if COMM_WORLD.rank == 0:
+        y_e[:, m] = y_e_list[m].data()
+
+if COMM_WORLD.rank == 0:
+    np.savetxt("ensemble_simulated_obs0.txt", y_e)
+
+        
 # do assimiliation step
-for k in range(N_obs):
+for k in range(10):
     PETSc.Sys.Print("Step", k)
     yVOM.dat.data[:] = y[k, :]
     jtfilter.assimilation_step(yVOM, log_likelihood)
@@ -82,4 +91,4 @@ for k in range(N_obs):
             y_e[:, m] = y_e_list[m].data()
 
     if COMM_WORLD.rank == 0:
-        np.savetxt("ensemble_simulated_obs"+str(k)+".txt", y_e)
+        np.savetxt("ensemble_simulated_obs"+str(k+1)+".txt", y_e)

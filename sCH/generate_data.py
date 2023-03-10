@@ -4,7 +4,7 @@ from firedrake import *
 from pyop2.mpi import MPI
 from nudging import *
 import numpy as np
-from stochastic_Camassa_Holm import Camsholm
+from stochastic_Camassa_Holm import Camsholm1 as Camsholm
 
 """
 create some synthetic data/observation data at T_1 ---- T_Nobs

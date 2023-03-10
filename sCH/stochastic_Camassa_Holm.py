@@ -5,7 +5,7 @@ from pyop2.mpi import MPI
 from nudging.model import *
 import numpy as np
 
-class Camsholm(base_model):
+class Camsholm1(base_model):
     def __init__(self, n, nsteps, dt = 0.01, alpha=1.0, seed=12353):
 
         self.n = n
@@ -22,12 +22,12 @@ class Camsholm(base_model):
         self.V = FunctionSpace(self.mesh, "CG", 1)
         self.W = MixedFunctionSpace((self.V, self.V))
         self.w0 = Function(self.W)
-        self.m0, self.u0 = self.w0.split()       
+        self.m0, self.u0 = self.w0.split()
 
         #Interpolate the initial condition
 
         #Solve for the initial condition for m.
-        alphasq = self.alpha**2
+        alphasq = Constant(self.alpha**2)
         self.p = TestFunction(self.V)
         self.m = TrialFunction(self.V)
         
@@ -36,8 +36,9 @@ class Camsholm(base_model):
         mprob = LinearVariationalProblem(self.am, self.Lm, self.m0)
         solver_parameters={'ksp_type': 'preonly', 'pc_type': 'lu'}
         self.msolve = LinearVariationalSolver(mprob,
-                                              solver_parameters=solver_parameters)
-        
+                                              solver_parameters
+                                              =solver_parameters)
+
         #Build the weak form of the timestepping algorithm. 
 
         self.p, self.q = TestFunctions(self.W)
@@ -55,7 +56,7 @@ class Camsholm(base_model):
         q = TrialFunction(self.V)
         self.xi = Function(self.V)
         a = inner(grad(p), grad(q))*dx + p*q*dx
-        L = p*self.xi*dx
+        L = Constant(0.1)*p*self.xi*dx
         dW_prob = LinearVariationalProblem(a, L, self.dW)
         self.dw_solver = LinearVariationalSolver(dW_prob,
                                                  solver_parameters={'mat_type': 'aij', 'ksp_type': 'preonly','pc_type': 'lu'})
@@ -64,6 +65,7 @@ class Camsholm(base_model):
         Dt = Constant(self.dt)
         self.mh = 0.5*(self.m1 + self.m0)
         self.uh = 0.5*(self.u1 + self.u0)
+        #self.v = self.uh*Dt+self.dW*Dt**0.5
         self.v = self.uh*Dt+self.dW*Dt**0.5
 
         self.L = ((self.q*self.u1 + alphasq*self.q.dx(0)*self.u1.dx(0) - self.q*self.m1)*dx +(self.p*(self.m1-self.m0) + (self.p*self.v.dx(0)*self.mh -self.p.dx(0)*self.v*self.mh))*dx)
@@ -73,7 +75,9 @@ class Camsholm(base_model):
         # solver
 
         self.uprob = NonlinearVariationalProblem(self.L, self.w1)
-        self.usolver = NonlinearVariationalSolver(self.uprob, solver_parameters={'mat_type': 'aij', 'ksp_type': 'preonly','pc_type': 'lu'})
+        sp = {'mat_type': 'aij', 'ksp_type': 'preonly','pc_type': 'lu'}
+        self.usolver = NonlinearVariationalSolver(self.uprob,
+                                                  solver_parameters=sp)
 
         # Data save
         self.m0, self.u0 = self.w0.split()
@@ -91,7 +95,7 @@ class Camsholm(base_model):
         self.VVOM = FunctionSpace(self.VOM, "DG", 0)
 
     def run(self, X0, X1):
-        for i in range(len(X0)):
+        for i in range(len(self.X)):
             self.X[i].assign(X0[i])
         self.w0.assign(self.X[0])
         self.msolve.solve()
