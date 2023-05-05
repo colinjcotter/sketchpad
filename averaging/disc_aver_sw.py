@@ -80,13 +80,18 @@ hparams = {
     'pc_type': 'python',
     'pc_python_type': 'firedrake.HybridizationPC',
     'hybridization': {'ksp_type': 'preonly',
-                      'pc_type': 'lu'}}
+                      'pc_type': 'lu',
+                      'pc_factor_mat_solver_type': 'mumps'}}
 mparams = {
+    'ksp_monitor': None,
     'ksp_type': 'preonly',
     'pc_type': 'fieldsplit',
-    'fieldsplit_0_ksp_type':'cg',
-    'fieldsplit_0_pc_type':'sor',
+    'fieldsplit_0_ksp_type':'preonly',
+    'fieldsplit_0_pc_type':'lu',
+    'fieldsplit_0_pc_factor_mat_solver_type': 'mumps',
+    'fieldsplit_0_sub_pc_type':'ilu',
     'fieldsplit_1_ksp_type':'preonly',
+    'fieldsplit_1_pc_type':'bjacobi',
     'fieldsplit_1_pc_type':'ilu'
 }
 
