@@ -56,7 +56,7 @@ class Camsholm1(base_model):
         q = TrialFunction(self.V)
         self.xi = Function(self.V)
         a = inner(grad(p), grad(q))*dx + p*q*dx
-        L = Constant(0.1)*p*self.xi*dx
+        L = Constant(1.0)*p*self.xi*dx
         dW_prob = LinearVariationalProblem(a, L, self.dW)
         self.dw_solver = LinearVariationalSolver(dW_prob,
                                                  solver_parameters={'mat_type': 'aij', 'ksp_type': 'preonly','pc_type': 'lu'})

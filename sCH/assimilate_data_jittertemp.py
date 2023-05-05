@@ -13,7 +13,7 @@ from stochastic_Camassa_Holm import Camsholm1 as Camsholm
 
 nsteps = 5
 model = Camsholm(100, nsteps)
-MALA = True
+MALA = False
 verbose = True
 jtfilter = jittertemp_filter(n_temp=4, n_jitt = 4, rho= 0.4,
                             verbose=verbose, MALA=MALA)
@@ -36,7 +36,7 @@ for i in range(nensemble[jtfilter.ensemble_rank]):
     u.interpolate(u0_exp)
 
 def log_likelihood(y, Y):
-    ll = (y-Y)**2/0.5**2/2*dx
+    ll = (y-Y)**2/0.05**2/2*dx
     return ll
     
 #Load data
@@ -74,7 +74,7 @@ if COMM_WORLD.rank == 0:
 
         
 # do assimiliation step
-for k in range(10):
+for k in range(y.shape[0]):
     PETSc.Sys.Print("Step", k)
     yVOM.dat.data[:] = y[k, :]
     jtfilter.assimilation_step(yVOM, log_likelihood)
