@@ -66,10 +66,12 @@ uh = (u0+u1)/2
 etah = (eta0+eta1)/2
 
 v, phi = TestFunctions(W)
+Fsign = Constant(1.0)
 
+dt_ss = dt_s*Fsign
 F = (
-    inner(v, u1 - u0) + dt_s*inner(f*perp(uh),v) - dt_s*g*etah*div(v)
-    + phi*(eta1 - eta0) + dt_s*H*div(uh)*phi
+    inner(v, u1 - u0) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*etah*div(v)
+    + phi*(eta1 - eta0) + dt_ss*H*div(uh)*phi
 )*dx
 
 params = {
@@ -149,8 +151,8 @@ uh = (u0 + u1 + w_k*nu)/2
 etah = (eta0 + eta1 + w_k*neta)/2
 
 F = (
-    inner(v, u1 - u0) + dt_s*inner(f*perp(uh),v) - dt_s*g*etah*div(v)
-    + phi*(eta1 - eta0) + dt_s*H*div(uh)*phi
+    inner(v, u1 - u0) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*etah*div(v)
+    + phi*(eta1 - eta0) + dt_ss*H*div(uh)*phi
 )*dx
 F += (inner(v, w_k*nu) + phi*w_k*neta)*dx
 
@@ -168,14 +170,18 @@ Xsolver = NonlinearVariationalSolver(XProb,
 # compute N, use to propagate X back, propagate W back
 # don't need to propagate W back on last step though
 
-svals = np.arange(ns+1)/ns #tvals goes from -rho*dt/2 to rho*dt/2
+svals = (0.5 + np.arange(ns+1)/ns)/2 #tvals goes from -rho*dt/2 to rho*dt/2
 weights = np.exp(-1.0/svals/(1.0-svals))
-weights[0] = 0.
+weights[0] /= 2
 weights[-1] = 0.
-weights = weights/np.sum(weights)
+weights = weights/np.sum(weights)/2
 
 # Function to take in current state V and return dV/dt
-def average(V, dVdt):
+def average(V, dVdt, forward=True):
+    if forward:
+        Fsign.assign(1.0)
+    else:
+        Fsign.assign(-1.0)
     W0.assign(V)
     # forward scatter
     dt_s.assign(dts)
@@ -288,11 +294,15 @@ while t < tmax + 0.5*dt:
     propagate(U0, U1)
     U1 /= 2
     # Compute U^* = exp(dt L)[ U^n + dt*<exp(-sL)N(exp(sL)U^n)>_s]
-    average(U0, Average)
+    average(U0, Average, forward=True)
     Ustar.assign(U0 + dt*Average)
+    average(U0, Average, forward=False)
+    Ustar += dt*Average
     # compute U^{n+1} = (B^n + U^*)/2 + dt*<exp(-sL)N(exp(sL)U^*)>/2
-    average(Ustar, Average)
+    average(Ustar, Average, forward=True)
     U1 += Ustar/2 + dt*Average/2
+    average(Ustar, Average, forward=False)
+    U1 += dt*Average/2
     # start all over again
     U0.assign(U1)
 
