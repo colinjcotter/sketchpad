@@ -168,6 +168,12 @@ Xsolver = NonlinearVariationalSolver(XProb,
 # compute N, use to propagate X back, propagate W back
 # don't need to propagate W back on last step though
 
+svals = np.arange(ns+1)/ns #tvals goes from -rho*dt/2 to rho*dt/2
+weights = np.exp(-1.0/svals/(1.0-svals))
+weights[0] = 0.
+weights[-1] = 0.
+weights = weights/np.sum(weights)
+
 # Function to take in current state V and return dV/dt
 def average(V, dVdt):
     W0.assign(V)
@@ -186,6 +192,7 @@ def average(V, dVdt):
         X1.assign(X0)
         # back propagate W
         if step > 0:
+            w_k.assign(weights[step])
             backward_expsolver.solve()
             W1.assign(W0)
     # copy contents
@@ -206,10 +213,6 @@ t = 0.
 tmax = 60.*60.*args.tmax
 dumpt = args.dumpt*60.*60.
 tdump = 0.
-
-svals = np.arange(0.5, ns)/ns #tvals goes from -rho*dt/2 to rho*dt/2
-weights = np.exp(-1.0/svals/(1.0-svals))
-weights = weights/np.sum(weights)
 
 x = SpatialCoordinate(mesh)
 
