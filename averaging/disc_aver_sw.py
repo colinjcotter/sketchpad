@@ -33,7 +33,7 @@ R0 = 6371220.
 H = Constant(5960.)
 
 mesh = IcosahedralSphereMesh(radius=R0,
-                             refinement_level=ref_level, degree=3)
+                             refinement_level=ref_level, degree=1)
 cx = SpatialCoordinate(mesh)
 mesh.init_cell_orientations(cx)
 
@@ -249,7 +249,7 @@ lambda_x = atan_2(x[1]/R0, x[0]/R0)
 lambda_c = -pi/2.0
 phi_x = asin(x[2]/R0)
 phi_c = pi/6.0
-minarg = Min(pow(rl, 2), pow(phi_x - phi_c, 2) + pow(lambda_x - lambda_c, 2))
+minarg = min_value(pow(rl, 2), pow(phi_x - phi_c, 2) + pow(lambda_x - lambda_c, 2))
 bexpr = 2000.0*(1 - sqrt(minarg)/rl)
 b.interpolate(bexpr)
 
