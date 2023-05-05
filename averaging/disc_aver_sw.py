@@ -74,21 +74,30 @@ F = (
     + phi*(eta1 - eta0) + dt_ss*H*div(uh)*phi
 )*dx
 
-params = {
+hparams = {
+    'mat_type': 'matfree',
     'ksp_type': 'preonly',
-    'mat_type': 'aij',
-    'pc_type': 'lu',
-    'pc_factor_mat_solver_type': 'mumps'
+    'pc_type': 'python',
+    'pc_python_type': 'firedrake.HybridizationPC',
+    'hybridization': {'ksp_type': 'preonly',
+                      'pc_type': 'lu'}}
+mparams = {
+    'ksp_type': 'preonly',
+    'pc_type': 'fieldsplit',
+    'fieldsplit_0_ksp_type':'cg',
+    'fieldsplit_0_pc_type':'sor',
+    'fieldsplit_1_ksp_type':'preonly',
+    'fieldsplit_1_pc_type':'ilu'
 }
 
 # Set up the forward scatter
 forward_expProb = NonlinearVariationalProblem(F, W1)
 forward_expsolver = NonlinearVariationalSolver(forward_expProb,
-                                               solver_parameters=params)
+                                               solver_parameters=hparams)
 # Set up the backward scatter
 backward_expProb = NonlinearVariationalProblem(F, W0)
 backward_expsolver = NonlinearVariationalSolver(backward_expProb,
-                                                solver_parameters=params)
+                                                solver_parameters=hparams)
 
 # Set up the nonlinear operator W -> N(W)
 gradperp = lambda f: perp(grad(f))
@@ -127,7 +136,7 @@ else:
 
 NProb = NonlinearVariationalProblem(L, N)
 NSolver = NonlinearVariationalSolver(NProb,
-                                  solver_parameters = params)
+                                  solver_parameters = mparams)
 
 # Set up the backward gather
 X0 = Function(W)
@@ -158,7 +167,7 @@ F += (inner(v, w_k*nu) + phi*w_k*neta)*dx
 
 XProb = NonlinearVariationalProblem(F, X0)
 Xsolver = NonlinearVariationalSolver(XProb,
-                                  solver_parameters = params)
+                                  solver_parameters = hparams)
 
 # total number of points is ns + 1, because we have s=0
 # after forward loop, W1 contains value at time ns*ds
