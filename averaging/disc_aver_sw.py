@@ -14,7 +14,8 @@ parser.add_argument('--dt', type=float, default=3, help='Timestep in hours. Defa
 parser.add_argument('--ns', type=int, default=10, help='Number of s steps in exponential approximation for average')
 parser.add_argument('--nt', type=int, default=10, help='Number of t steps in exponential approximation for time propagator')
 parser.add_argument('--alpha', type=float, default=1, help='Averaging window width as a multiple of dt. Default 1.')
-parser.add_argument('--filename', type=str, default='w2')
+parser.add_argument('--filename', type=str, default='w2', help='filename for pvd')
+parser.add_argument('--check', action="store_true", help='print out some information about frequency resolution and exit')
 
 args = parser.parse_known_args()
 args = args[0]
@@ -27,6 +28,16 @@ dts = alpha*dt/args.ns
 dt_s = Constant(dts)
 ns = args.ns
 nt = args.nt
+
+if args.check:
+    eigs = [0.003465, 0.007274, 0.014955] #maximum frequency for ref 3-5
+    eig = eigs[ref_level-3]
+    # if we are doing exp(tL) then minimum period is period of exp(it*eig)
+    # which is 2*pi/eig
+    min_period = 2*np.pi/eig
+    print("ds steps per min wavelength", min_period/dts)
+    print("dt steps per min wavelength", min_period/dt*nt)
+    import sys; sys.exit()
 
 #some domain, parameters and FS setup
 R0 = 6371220.
@@ -89,10 +100,9 @@ mparams = {
     'fieldsplit_0_ksp_type':'preonly',
     'fieldsplit_0_pc_type':'lu',
     'fieldsplit_0_pc_factor_mat_solver_type': 'mumps',
-    'fieldsplit_0_sub_pc_type':'ilu',
     'fieldsplit_1_ksp_type':'preonly',
     'fieldsplit_1_pc_type':'bjacobi',
-    'fieldsplit_1_pc_type':'ilu'
+    'fieldsplit_1_sub_pc_type':'ilu'
 }
 
 # Set up the forward scatter
@@ -184,7 +194,7 @@ Xsolver = NonlinearVariationalSolver(XProb,
 # compute N, use to propagate X back, propagate W back
 # don't need to propagate W back on last step though
 
-svals = (0.5 + np.arange(ns+1)/ns)/2 #tvals goes from -rho*dt/2 to rho*dt/2
+svals = 0.5 + np.arange(ns+1)/ns/2 #tvals goes from -rho*dt/2 to rho*dt/2
 weights = np.exp(-1.0/svals/(1.0-svals))
 weights[0] /= 2
 weights[-1] = 0.
@@ -222,7 +232,7 @@ def average(V, dVdt, forward=True):
 def propagate(V_in, V_out):
     W0.assign(V_in)
     # forward scatter
-    dt_s.assign(dt)
+    dt_s.assign(dt/nt)
     for step in range(nt):
         forward_expsolver.solve()
         W0.assign(W1)
