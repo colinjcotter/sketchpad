@@ -5,7 +5,8 @@ parser.add_argument('--ref_level', type=int, default=3, help='Refinement level o
 parser.add_argument('--tmax', type=float, default=360, help='Final time in hours. Default 24x15=360.')
 parser.add_argument('--dumpt', type=float, default=6, help='Dump time in hours. Default 6.')
 parser.add_argument('--dt', type=float, default=3, help='Timestep in hours. Default 3.')
-parser.add_argument('--ns', type=int, default=10, help='Number of s steps in exponential approximation')
+parser.add_argument('--ns', type=int, default=10, help='Number of s steps in exponential approximation for average')
+parser.add_argument('--nt', type=int, default=10, help='Number of t steps in exponential approximation for time propagator')
 parser.add_argument('--alpha', type=float, default=1, help='Averaging window width as a multiple of dt. Default 1.')
 parser.add_argument('--filename', type=str, default='w2')
 
@@ -15,8 +16,10 @@ args = args[0]
 hours = args.dt
 dt = 60*60*hours
 alpha = args.alpha #averaging window is [-alpha*dt, alpha*dt]
-dt_s = Constant(alpha*dt/args.ns)
-dT = Constant(dt)
+dts = alpha*dt/args.ns
+dt_s = Constant(dts)
+ns = args.ns
+nt = args.nt
 
 from firedrake import *
 import numpy as np
@@ -55,8 +58,8 @@ c = sqrt(g*H)
 #Set up the forward and backwards scatter discrete exponential operator
 W0 = Function(W)
 W1 = Function(W)
-u0, eta0 = W0.subfunctions
-u1, eta1 = W1.subfunctions
+u0, eta0 = split(W0)
+u1, eta1 = split(W1)
 #D = eta + b
 
 uh = (u0+u1)/2
@@ -94,64 +97,119 @@ K = 0.5*inner(u0, u0)
 uup = 0.5 * (dot(u0, n) + abs(dot(u0, n)))
 
 N = Function(W)
-nu, neta = N.subfunctions
+nu, neta = split(N)
 
 vector_invariant = True
 L = inner(nu, v)*dx + neta*phi*dx
 if vector_invariant:
     L -= (
-        + inner(perp(grad(inner(v, perp(u0)))), u0)*dx
-        - inner(both(perp(n)*inner(v, perp(u0))),
-                both(Upwind*u0))*dS
+        + inner(perp(grad(inner(v, perp(u1)))), u1)*dx
+        - inner(both(perp(n)*inner(v, perp(u1))),
+                both(Upwind*u1))*dS
         + div(v)*K*dx
-        + inner(grad(phi), u0*(eta0-b))*dx
-        - jump(phi)*(uup('+')*(eta0('+')-b('+'))
-                     - uup('-')*(eta0('-') - b('-')))*dS
+        + inner(grad(phi), u1*(eta1-b))*dx
+        - jump(phi)*(uup('+')*(eta1('+')-b('+'))
+                     - uup('-')*(eta1('-') - b('-')))*dS
     )
 else:
     L -= (
-        + inner(div(outer(u0, v)), u0)*dx
-        - inner(both(inner(n, u0)*v), both(Upwind*u0))*dS
-        + inner(grad(phi), u0*(eta0-b))*dx
-        - jump(phi)*(uup('+')*(eta0('+')-b('+'))
-                     - uup('-')*(eta0('-') - b('-')))*dS
+        + inner(div(outer(u1, v)), u1)*dx
+        - inner(both(inner(n, u1)*v), both(Upwind*u1))*dS
+        + inner(grad(phi), u1*(eta1-b))*dx
+        - jump(phi)*(uup('+')*(eta1('+')-b('+'))
+                     - uup('-')*(eta1('-') - b('-')))*dS
     )
 
 
 #with topography, D = H + eta - b
 
 NProb = NonlinearVariationalProblem(L, N)
-NSolver = LinearVariationalSolver(NProb,
+NSolver = NoninearVariationalSolver(NProb,
                                   solver_parameters = params)
 
 # Set up the backward gather
 X0 = Function(W)
 X1 = Function(W)
-u0, eta0 = X0.subfunctions
-u1, eta1 = X1.subfunctions
+u0, eta0 = split(X0)
+u1, eta1 = split(X1)
+
+# exph(L ds) = (1 - ds/2*L)^{-1}(1 + ds/2*L)
+# exph(-L ds) = (1 + ds/2*L)^{-1}(1 - ds/2*L)
+
+# X^k = sum_{m=k}^M w_m (exph(-L ds))^m N(W_m)
+# X^{M+1} = 0
+# X^{k-1} = exph(-L ds)X^k + w_{k-1}*N(W_{k-1})
+# (1 + ds/2*L)X^{k-1} = (1 - ds/2*L)X^k + w_k*(1 + ds/2*L)N(W_{k-1})
+# X^k - X^{k-1] - ds*L(X^{k-1/2} + w_k N(W_{k-1})/2) + w_k W_{k-1} = 0
+
+# we propagate W back, compute N, use to propagate X back
+
+w_k = Constant(1.0) # the weight
+uh = (u0 + u1 + w_k*nu)/2
+etah = (eta0 + eta1 + w_k*neta)/2
 
 F = (
     inner(v, u1 - u0) + dt_s*inner(f*perp(uh),v) - dt_s*g*etah*div(v)
     + phi*(eta1 - eta0) + dt_s*H*div(uh)*phi
 )*dx
-F += 
+F += (inner(v, w_k*nu) + phi*w_k*neta)*dx
 
+Xprob = NonlinearVariationalProblem(F, X0)
+Xsolver = NoninearVariationalSolver(XProb,
+                                  solver_parameters = params)
 
+# total number of points is ns + 1, because we have s=0
+# after forward loop, W1 contains value at time ns*ds
+# if we start with X^{ns+1}=0, then according to above
+# (1 + ds/2*L)X^{ns} = w_k(1+ds/2*L)N(W_{ns})
+# which is equivalent to X^{ns} = N(W_{ns})
+# so everything is working
+# we just need to change the order to
+# compute N, use to propagate X back, propagate W back
+# don't need to propagate W back on last step though
+
+# Function to take in current state V and return dV/dt
+def average(V, dVdt):
+    W0.assign(V)
+    # forward scatter
+    dt_s.assign(dts)
+    for step in range(ns):
+        forward_expsolver.solve()
+        W0.assign(W1)
+    # backwards gather
+    X1.assign(0.)
+    for step in range(ns, -1, -1):
+        # compute N
+        Nsolver.solve()
+        # propagate X back
+        Xsolver.solve()
+        X1.assign(X0)
+        # back propagate W
+        if step > 0:
+            backward_expsolver.solve()
+            W1.assign(W0)
+    # copy contents
+    dVdt.assign(X0)
+
+# Function to apply forward propagation in t
+def propagate(V_in, V_out):
+    W0.assign(V_in)
+    # forward scatter
+    dt_s.assign(dt)
+    for step in range(nt):
+        forward_expsolver.solve()
+        W0.assign(W1)
+    # copy contents
+    V_out.assign(W1)
 
 t = 0.
 tmax = 60.*60.*args.tmax
 dumpt = args.dumpt*60.*60.
 tdump = 0.
 
-svals = np.arange(0.5, Mbar)/Mbar #tvals goes from -rho*dt/2 to rho*dt/2
+svals = np.arange(0.5, ns)/ns #tvals goes from -rho*dt/2 to rho*dt/2
 weights = np.exp(-1.0/svals/(1.0-svals))
 weights = weights/np.sum(weights)
-svals -= 0.5
-
-rank = ensemble.ensemble_comm.rank
-expt = rho*dt*svals[rank]
-wt = weights[rank]
-print(wt,"weight",expt)
 
 x = SpatialCoordinate(mesh)
 
@@ -172,15 +230,13 @@ minarg = Min(pow(rl, 2), pow(phi_x - phi_c, 2) + pow(lambda_x - lambda_c, 2))
 bexpr = 2000.0*(1 - sqrt(minarg)/rl)
 b.interpolate(bexpr)
 
-un1 = Function(V1)
-etan1 = Function(V1)
+U0 = Function(W)
+U1 = Function(W)
+Ustar = Function(W)
+Average = Function(W)
 
-U = Function(W)
-eU = Function(W)
-DU = Function(W)
-V = Function(W)
-
-U_u, U_eta = U.split()
+# set up initial conditions
+U_u, U_eta = V0.split()
 U_u.assign(un)
 U_eta.assign(etan)
 
@@ -197,47 +253,51 @@ while t < tmax + 0.5*dt:
     t += dt
     tdump += dt
 
-    if nonlinear:
+    # V_t = <exp(-(t+s)L)N(exp((t+s)L)V)>_s
+    
+    # V^* = V^n + dt*f(V^n)
+    # V^{n+1} = V^n + dt*f((V^n + V^*)/2)
 
-        #first order splitting
-        # U_{n+1} = \Phi(\exp(tL)U_n)
-        #         = \exp(tL)(U_n + \exp(-tL)\Delta\Phi(\exp(tL)U_n))
-        #averaged version
-        # U_{n+1} = \exp(tL)(U_n + \int \rho\exp(-sL)\Delta\Phi(\exp(sL)U_n))ds
+    # V = exp(-tL)U
+    # U = exp(tL)V
 
-        #apply forward transformation and put result in V, storing copy in eU
-        cheby.apply(U, eU, expt)
-        V.assign(eU)
-        
-        #apply forward slow step to V
-        #using sub-cycled SSPRK2
+    # STEP 1
+    # t is time at start of timestep
+    # exp(-(t+dt)L)U^* = exp(-tL)U^n + dt*<exp(-(t+s)L)N(
+    #                                         exp((t+s)L)V^n)>_s
+    # exp(-(t+dt)L)U^* = exp(-tL)U^n + dt*<exp(-(t+s)L)N(exp(sL)U^n)>_s
+    # so
+    # U^* = exp(dt L)[ U^n + dt*<exp(-sL)N(exp(sL)U^n)>_s]
 
-        for i in range(ncycles):
-            USlow_in.assign(V)
-            SlowSolver.solve()
-            USlow_in.assign(USlow_out)
-            SlowSolver.solve()
-            V.assign(0.5*(V + USlow_out))
-        #compute difference from initial value
-        V -= eU
+    # STEP 2
+    # exp(-(t+dt)L)U^{n+1} = exp(-tL)U^n + dt*<
+    #                  exp(-(t+s)L)N(exp((t+s)L)V^n)/2
+    #                +exp(-(t+dt+s)L)N(exp((t+dt+s)L)V^*)/2>
+    # so
+    # exp(-(t+dt)L)U^{n+1} = exp(-tL)U^n + dt*<
+    #                  exp(-(t+s)L)N(exp(sL)U^n)/2
+    #                +exp(-(t+dt+s)L)N(exp(sL)U^*)/2>
+    # s0
+    # U^{n+1} = exp(dt L)[U^n + dt*<
+    #                  exp(-sL)N(exp(sL)U^n)>/2]
+    #                +dt*<exp(-sL)N(exp(sL)U^*)>/2
+    #         = exp(dt L)U^n/2 + U^*/2 + dt*<exp(-sL)N(exp(sL)U^*)>/2
 
-        #apply backwards transformation, put result in DU
-        #without filtering
-        cheby.apply(V, DU, -expt)
-        DU *= wt
+    # steps are then
+    # Compute B^n = exp(dt L)U^n
+    propagate(U0, U1)
+    U1 /= 2
+    # Compute U^* = exp(dt L)[ U^n + dt*<exp(-sL)N(exp(sL)U^n)>_s]
+    average(U0, Average)
+    Ustar.assign(U0 + dt*Average)
+    # compute U^{n+1} = (B^n + U^*)/2 + dt*<exp(-sL)N(exp(sL)U^*)>/2
+    average(Ustar, Average)
+    U1 += Ustar/2 + dt*Average/2
+    # start all over again
+    U0.assign(U1)
 
-        #average into V
-        ensemble.allreduce(DU, V)
-        U += V
-
-    V.assign(U)
-
-    #transform forwards to next timestep
-    cheby2.apply(V, U, dt)
-
-    if rank == 0:
-        if tdump > dumpt - dt*0.5:
-            un.assign(U_u)
-            etan.assign(U_eta)
-            file_sw.write(un, etan, b)
-            tdump -= dumpt
+    if tdump > dumpt - dt*0.5:
+        un.assign(U_u)
+        etan.assign(U_eta)
+        file_sw.write(un, etan, b)
+        tdump -= dumpt
