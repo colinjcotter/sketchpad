@@ -1,3 +1,9 @@
+from firedrake import *
+import numpy as np
+
+from firedrake.petsc import PETSc
+print = PETSc.Sys.Print
+
 #get command arguments
 import argparse
 parser = argparse.ArgumentParser(description='Williamson 5 testcase for averaged propagator.')
@@ -13,6 +19,7 @@ parser.add_argument('--filename', type=str, default='w2')
 args = parser.parse_known_args()
 args = args[0]
 
+ref_level = args.ref_level
 hours = args.dt
 dt = 60*60*hours
 alpha = args.alpha #averaging window is [-alpha*dt, alpha*dt]
@@ -21,19 +28,12 @@ dt_s = Constant(dts)
 ns = args.ns
 nt = args.nt
 
-from firedrake import *
-import numpy as np
-
-from firedrake.petsc import PETSc
-print = PETSc.Sys.Print
-
 #some domain, parameters and FS setup
 R0 = 6371220.
 H = Constant(5960.)
 
 mesh = IcosahedralSphereMesh(radius=R0,
-                             refinement_level=ref_level, degree=3,
-                             comm = ensemble.comm)
+                             refinement_level=ref_level, degree=3)
 cx = SpatialCoordinate(mesh)
 mesh.init_cell_orientations(cx)
 
@@ -80,11 +80,11 @@ params = {
 }
 
 # Set up the forward scatter
-forward_expProb = NonlinearVariationalProblem(F, w1)
+forward_expProb = NonlinearVariationalProblem(F, W1)
 forward_expsolver = NonlinearVariationalSolver(forward_expProb,
                                                solver_parameters=params)
 # Set up the backward scatter
-backward_expProb = NonlinearVariationalProblem(F, w0)
+backward_expProb = NonlinearVariationalProblem(F, W0)
 backward_expsolver = NonlinearVariationalSolver(backward_expProb,
                                                 solver_parameters=params)
 
@@ -124,7 +124,7 @@ else:
 #with topography, D = H + eta - b
 
 NProb = NonlinearVariationalProblem(L, N)
-NSolver = NoninearVariationalSolver(NProb,
+NSolver = NonlinearVariationalSolver(NProb,
                                   solver_parameters = params)
 
 # Set up the backward gather
@@ -154,8 +154,8 @@ F = (
 )*dx
 F += (inner(v, w_k*nu) + phi*w_k*neta)*dx
 
-Xprob = NonlinearVariationalProblem(F, X0)
-Xsolver = NoninearVariationalSolver(XProb,
+XProb = NonlinearVariationalProblem(F, X0)
+Xsolver = NonlinearVariationalSolver(XProb,
                                   solver_parameters = params)
 
 # total number of points is ns + 1, because we have s=0
@@ -180,7 +180,7 @@ def average(V, dVdt):
     X1.assign(0.)
     for step in range(ns, -1, -1):
         # compute N
-        Nsolver.solve()
+        NSolver.solve()
         # propagate X back
         Xsolver.solve()
         X1.assign(X0)
@@ -236,16 +236,13 @@ Ustar = Function(W)
 Average = Function(W)
 
 # set up initial conditions
-U_u, U_eta = V0.split()
+U_u, U_eta = U0.split()
 U_u.assign(un)
 U_eta.assign(etan)
 
 name = args.filename
-if rank==0:
-    file_sw = File(name+'.pvd', comm=ensemble.comm)
-    file_sw.write(un, etan, b)
-
-nonlinear = args.nonlinear
+file_sw = File(name+'.pvd')
+file_sw.write(un, etan, b)
 
 print ('tmax', tmax, 'dt', dt)
 while t < tmax + 0.5*dt:
