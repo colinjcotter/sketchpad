@@ -172,7 +172,8 @@ u1, eta1 = split(X1)
 
 w_k = Constant(1.0) # the weight
 uh = (u0 + u1 + w_k*nu)/2
-etah = (eta0 + eta1 + w_k*neta)/2
+theta = Constant(0.5)
+etah = ((1-theta)*eta0 + theta*(eta1 + w_k*neta))/2
 
 F = (
     inner(v, u1 - u0) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*etah*div(v)
