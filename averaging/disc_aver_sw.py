@@ -322,6 +322,7 @@ while t < tmax + 0.5*dt:
     Ustar.assign(U0 + dt*Average)
     average(U0, Average, forward=False)
     Ustar += dt*Average
+    propagate(Ustar, Ustar)
     # compute U^{n+1} = (B^n + U^*)/2 + dt*<exp(-sL)N(exp(sL)U^*)>/2
     average(Ustar, Average, forward=True)
     U1 += Ustar/2 + dt*Average/2
