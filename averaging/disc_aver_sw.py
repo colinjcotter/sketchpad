@@ -86,6 +86,7 @@ F = (
 )*dx
 
 hparams = {
+    'snes_lag_jacobian': -2,
     'mat_type': 'matfree',
     'ksp_type': 'preonly',
     'pc_type': 'python',
@@ -94,7 +95,8 @@ hparams = {
                       'pc_type': 'lu',
                       'pc_factor_mat_solver_type': 'mumps'}}
 mparams = {
-    'ksp_monitor': None,
+    #'ksp_monitor': None,
+    'snes_lag_jacobian': -2,
     'ksp_type': 'preonly',
     'pc_type': 'fieldsplit',
     'fieldsplit_0_ksp_type':'preonly',
@@ -202,7 +204,7 @@ weights[-1] = 0.
 weights = weights/np.sum(weights)/2
 
 # Function to take in current state V and return dV/dt
-def average(V, dVdt, forward=True):
+def average(V, dVdt, forward=True, t=None):
     if forward:
         Fsign.assign(1.0)
     else:
@@ -211,11 +213,13 @@ def average(V, dVdt, forward=True):
     # forward scatter
     dt_s.assign(dts)
     for step in range(ns):
+        print('average forward', step, ns, t)
         forward_expsolver.solve()
         W0.assign(W1)
     # backwards gather
     X1.assign(0.)
     for step in range(ns, -1, -1):
+        print('average backward', step, t)
         # compute N
         NSolver.solve()
         # propagate X back
@@ -230,11 +234,12 @@ def average(V, dVdt, forward=True):
     dVdt.assign(X0)
 
 # Function to apply forward propagation in t
-def propagate(V_in, V_out):
+def propagate(V_in, V_out, t=None):
     W0.assign(V_in)
     # forward scatter
     dt_s.assign(dt/nt)
     for step in range(nt):
+        print('propagate', step, nt, t)
         forward_expsolver.solve()
         W0.assign(W1)
     # copy contents
@@ -316,18 +321,18 @@ while t < tmax + 0.5*dt:
 
     # steps are then
     # Compute B^n = exp(dt L)U^n
-    propagate(U0, U1)
+    propagate(U0, U1, t=t)
     U1 /= 2
     # Compute U^* = exp(dt L)[ U^n + dt*<exp(-sL)N(exp(sL)U^n)>_s]
-    average(U0, Average, forward=True)
+    average(U0, Average, forward=True, t=t)
     Ustar.assign(U0 + dt*Average)
-    average(U0, Average, forward=False)
+    average(U0, Average, forward=False, t=t)
     Ustar += dt*Average
-    propagate(Ustar, Ustar)
+    propagate(Ustar, Ustar, t=t)
     # compute U^{n+1} = (B^n + U^*)/2 + dt*<exp(-sL)N(exp(sL)U^*)>/2
-    average(Ustar, Average, forward=True)
+    average(Ustar, Average, forward=True, t=t)
     U1 += Ustar/2 + dt*Average/2
-    average(Ustar, Average, forward=False)
+    average(Ustar, Average, forward=False, t=t)
     U1 += dt*Average/2
     # start all over again
     U0.assign(U1)
