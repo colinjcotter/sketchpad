@@ -73,16 +73,36 @@ u0, eta0 = split(W0)
 u1, eta1 = split(W1)
 #D = eta + b
 
-uh = (u0+u1)/2
-etah = (eta0+eta1)/2
-
 v, phi = TestFunctions(W)
-Fsign = Constant(1.0)
 
-dt_ss = dt_s*Fsign
-F = (
-    inner(v, u1 - u0) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*etah*div(v)
-    + phi*(eta1 - eta0) + dt_ss*H*div(uh)*phi
+u, eta = TrialFunctions(W)
+uh = (u0+u)/2
+etah = (eta0+eta)/2
+
+dt_ss = dt_s
+F1p = (
+    inner(v, u - u0) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*etah*div(v)
+    + phi*(eta - eta0) + dt_ss*H*div(uh)*phi
+)*dx
+
+uh = (u+u1)/2
+etah = (eta+eta1)/2
+F0p = (
+    inner(v, u1 - u) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*etah*div(v)
+    + phi*(eta1 - eta) + dt_ss*H*div(uh)*phi
+)*dx
+
+dt_ss = dt_s
+F1m = (
+    inner(v, u - u0) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*etah*div(v)
+    + phi*(eta - eta0) + dt_ss*H*div(uh)*phi
+)*dx
+
+uh = (u+u1)/2
+etah = (eta+eta1)/2
+F0m = (
+    inner(v, u1 - u) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*etah*div(v)
+    + phi*(eta1 - eta) + dt_ss*H*div(uh)*phi
 )*dx
 
 hparams = {
@@ -108,12 +128,19 @@ mparams = {
 }
 
 # Set up the forward scatter
-forward_expProb = NonlinearVariationalProblem(F, W1)
-forward_expsolver = NonlinearVariationalSolver(forward_expProb,
+forwardp_expProb = LinearVariationalProblem(lhs(F1p), rhs(F1p), W1)
+forwardp_expsolver = LinearVariationalSolver(forwardp_expProb,
                                                solver_parameters=hparams)
+forwardm_expProb = LinearVariationalProblem(lhs(F1m), rhs(F1m), W1)
+forwardm_expsolver = LinearVariationalSolver(forwardm_expProb,
+                                               solver_parameters=hparams)
+
 # Set up the backward scatter
-backward_expProb = NonlinearVariationalProblem(F, W0)
-backward_expsolver = NonlinearVariationalSolver(backward_expProb,
+backwardp_expProb = LinearVariationalProblem(lhs(F0p), rhs(F1p), W0)
+backwardp_expsolver = LinearVariationalSolver(backwardp_expProb,
+                                                solver_parameters=hparams)
+backwardm_expProb = LinearVariationalProblem(lhs(F0m), rhs(F1m), W0)
+backwardm_expsolver = LinearVariationalSolver(backwardm_expProb,
                                                 solver_parameters=hparams)
 
 # Set up the nonlinear operator W -> N(W)
@@ -125,7 +152,7 @@ K = 0.5*inner(u0, u0)
 uup = 0.5 * (dot(u0, n) + abs(dot(u0, n)))
 
 N = Function(W)
-nu, neta = split(N)
+nu, neta = TrialFunctions(W)
 
 vector_invariant = True
 L = inner(nu, v)*dx + neta*phi*dx
@@ -151,8 +178,8 @@ else:
 
 #with topography, D = H + eta - b
 
-NProb = NonlinearVariationalProblem(L, N)
-NSolver = NonlinearVariationalSolver(NProb,
+NProb = LinearVariationalProblem(lhs(L), rhs(L), N)
+NSolver = LinearVariationalSolver(NProb,
                                   solver_parameters = mparams)
 
 # Set up the backward gather
@@ -173,18 +200,34 @@ u1, eta1 = split(X1)
 # we propagate W back, compute N, use to propagate X back
 
 w_k = Constant(1.0) # the weight
-uh = (u0 + u1 + w_k*nu)/2
+u, eta = TrialFunctions(W)
+
+nu, neta = split(N)
+
+uh = (u + u1 + w_k*nu)/2
 theta = Constant(0.5)
-etah = ((1-theta)*eta0 + theta*(eta1 + w_k*neta))/2
+etah = ((1-theta)*eta + theta*(eta1 + w_k*neta))/2
 
-F = (
-    inner(v, u1 - u0) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*etah*div(v)
-    + phi*(eta1 - eta0) + dt_ss*H*div(uh)*phi
+dt_ss = dt_s
+Fp = (
+    inner(v, u1 - u) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*etah*div(v)
+    + phi*(eta1 - eta) + dt_ss*H*div(uh)*phi
 )*dx
-F += (inner(v, w_k*nu) + phi*w_k*neta)*dx
+Fp += (inner(v, w_k*nu) + phi*w_k*neta)*dx
 
-XProb = NonlinearVariationalProblem(F, X0)
-Xsolver = NonlinearVariationalSolver(XProb,
+XProbp = LinearVariationalProblem(lhs(Fp), rhs(Fp), X0)
+Xpsolver = LinearVariationalSolver(XProbp,
+                                  solver_parameters = hparams)
+
+dt_ss = -dt_s
+Fm = (
+    inner(v, u1 - u) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*etah*div(v)
+    + phi*(eta1 - eta) + dt_ss*H*div(uh)*phi
+)*dx
+Fm += (inner(v, w_k*nu) + phi*w_k*neta)*dx
+
+XProbm = LinearVariationalProblem(lhs(Fm), rhs(Fm), X0)
+Xmsolver = LinearVariationalSolver(XProbm,
                                   solver_parameters = hparams)
 
 # total number of points is ns + 1, because we have s=0
@@ -205,16 +248,15 @@ weights = weights/np.sum(weights)/2
 
 # Function to take in current state V and return dV/dt
 def average(V, dVdt, forward=True, t=None):
-    if forward:
-        Fsign.assign(1.0)
-    else:
-        Fsign.assign(-1.0)
     W0.assign(V)
     # forward scatter
     dt_s.assign(dts)
     for step in range(ns):
         print('average forward', step, ns, t)
-        forward_expsolver.solve()
+        if forward:
+            forwardp_expsolver.solve()
+        else:
+            forwardm_expsolver.solve()
         W0.assign(W1)
     # backwards gather
     X1.assign(0.)
@@ -223,12 +265,18 @@ def average(V, dVdt, forward=True, t=None):
         # compute N
         NSolver.solve()
         # propagate X back
-        Xsolver.solve()
+        if forward:
+            Xpsolver.solve()
+        else:
+            Xmsolver.solve()
         X1.assign(X0)
         # back propagate W
         if step > 0:
             w_k.assign(weights[step])
-            backward_expsolver.solve()
+            if forward:
+                backwardp_expsolver.solve()
+            else:
+                backwardm_expsolver.solve()
             W1.assign(W0)
     # copy contents
     dVdt.assign(X0)
@@ -240,7 +288,7 @@ def propagate(V_in, V_out, t=None):
     dt_s.assign(dt/nt)
     for step in range(nt):
         print('propagate', step, nt, t)
-        forward_expsolver.solve()
+        forwardp_expsolver.solve()
         W0.assign(W1)
     # copy contents
     V_out.assign(W1)
