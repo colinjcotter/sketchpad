@@ -247,13 +247,13 @@ weights[-1] = 0.
 weights = weights/np.sum(weights)/2
 
 # Function to take in current state V and return dV/dt
-def average(V, dVdt, forward=True, t=None):
+def average(V, dVdt, positive=True, t=None):
     W0.assign(V)
     # forward scatter
     dt_s.assign(dts)
     for step in range(ns):
         print('average forward', step, ns, t)
-        if forward:
+        if positive:
             forwardp_expsolver.solve()
         else:
             forwardm_expsolver.solve()
@@ -265,7 +265,7 @@ def average(V, dVdt, forward=True, t=None):
         # compute N
         NSolver.solve()
         # propagate X back
-        if forward:
+        if positive:
             Xpsolver.solve()
         else:
             Xmsolver.solve()
@@ -273,7 +273,7 @@ def average(V, dVdt, forward=True, t=None):
         # back propagate W
         if step > 0:
             w_k.assign(weights[step])
-            if forward:
+            if positive:
                 backwardp_expsolver.solve()
             else:
                 backwardm_expsolver.solve()
@@ -372,15 +372,15 @@ while t < tmax + 0.5*dt:
     propagate(U0, U1, t=t)
     U1 /= 2
     # Compute U^* = exp(dt L)[ U^n + dt*<exp(-sL)N(exp(sL)U^n)>_s]
-    average(U0, Average, forward=True, t=t)
+    average(U0, Average, positive=True, t=t)
     Ustar.assign(U0 + dt*Average)
-    average(U0, Average, forward=False, t=t)
+    average(U0, Average, positive=False, t=t)
     Ustar += dt*Average
     propagate(Ustar, Ustar, t=t)
     # compute U^{n+1} = (B^n + U^*)/2 + dt*<exp(-sL)N(exp(sL)U^*)>/2
-    average(Ustar, Average, forward=True, t=t)
+    average(Ustar, Average, positive=True, t=t)
     U1 += Ustar/2 + dt*Average/2
-    average(Ustar, Average, forward=False, t=t)
+    average(Ustar, Average, positive=False, t=t)
     U1 += dt*Average/2
     # start all over again
     U0.assign(U1)
