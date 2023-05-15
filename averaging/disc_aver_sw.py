@@ -205,8 +205,8 @@ u, eta = TrialFunctions(W)
 nu, neta = split(N)
 
 theta = Constant(0.5)
-uh = ((1-theta)*u + theta*u1 + (1-theta)*w_k*nu)
-etah = ((1-theta)*eta + theta*eta1 + (1-theta)*w_k*neta))
+uh = (1-theta)*u + theta*u1 + (1-theta)*w_k*nu
+etah = (1-theta)*eta + theta*eta1 + (1-theta)*w_k*neta
 
 dt_ss = dt_s
 Fp = (
