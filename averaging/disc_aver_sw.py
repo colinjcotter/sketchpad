@@ -92,7 +92,7 @@ F0p = (
     + phi*(eta1 - eta) + dt_ss*H*div(uh)*phi
 )*dx
 
-dt_ss = dt_s
+dt_ss = -dt_s
 F1m = (
     inner(v, u - u0) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*etah*div(v)
     + phi*(eta - eta0) + dt_ss*H*div(uh)*phi
