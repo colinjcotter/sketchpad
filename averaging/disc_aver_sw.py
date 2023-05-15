@@ -204,9 +204,9 @@ u, eta = TrialFunctions(W)
 
 nu, neta = split(N)
 
-uh = (u + u1 + w_k*nu)/2
 theta = Constant(0.5)
-etah = ((1-theta)*eta + theta*(eta1 + w_k*neta))/2
+uh = ((1-theta)*u + theta*u1 + (1-theta)*w_k*nu)
+etah = ((1-theta)*eta + theta*eta1 + (1-theta)*w_k*neta))
 
 dt_ss = dt_s
 Fp = (
@@ -230,7 +230,7 @@ XProbm = LinearVariationalProblem(lhs(Fm), rhs(Fm), X0)
 Xmsolver = LinearVariationalSolver(XProbm,
                                   solver_parameters = hparams)
 
-# total number of points is ns + 1, because we have s=0
+# total number of points is 2ns + 1, because we have s=0
 # after forward loop, W1 contains value at time ns*ds
 # if we start with X^{ns+1}=0, then according to above
 # (1 + ds/2*L)X^{ns} = w_k(1+ds/2*L)N(W_{ns})
@@ -240,8 +240,9 @@ Xmsolver = LinearVariationalSolver(XProbm,
 # compute N, use to propagate X back, propagate W back
 # don't need to propagate W back on last step though
 
-svals = 0.5 + np.arange(ns+1)/ns/2 #tvals goes from -rho*dt/2 to rho*dt/2
+svals = 0.5 + np.arange(2*ns+1)/2/ns/2 #tvals goes from -rho*dt/2 to rho*dt/2
 weights = np.exp(-1.0/svals/(1.0-svals))
+weights = weights[ns:]
 weights[0] /= 2
 weights[-1] = 0.
 weights = weights/np.sum(weights)/2
