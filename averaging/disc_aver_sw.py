@@ -106,7 +106,6 @@ F0m = (
 )*dx
 
 hparams = {
-    'snes_lag_jacobian': -2,
     'mat_type': 'matfree',
     'ksp_type': 'preonly',
     'pc_type': 'python',
@@ -116,7 +115,6 @@ hparams = {
                       'pc_factor_mat_solver_type': 'mumps'}}
 mparams = {
     #'ksp_monitor': None,
-    'snes_lag_jacobian': -2,
     'ksp_type': 'preonly',
     'pc_type': 'fieldsplit',
     'fieldsplit_0_ksp_type':'preonly',
@@ -128,18 +126,22 @@ mparams = {
 }
 
 # Set up the forward scatter
-forwardp_expProb = LinearVariationalProblem(lhs(F1p), rhs(F1p), W1)
+forwardp_expProb = LinearVariationalProblem(lhs(F1p), rhs(F1p), W1,
+                                            constant_jacobian=True)
 forwardp_expsolver = LinearVariationalSolver(forwardp_expProb,
                                                solver_parameters=hparams)
-forwardm_expProb = LinearVariationalProblem(lhs(F1m), rhs(F1m), W1)
+forwardm_expProb = LinearVariationalProblem(lhs(F1m), rhs(F1m), W1,
+                                            constant_jacobian=True)
 forwardm_expsolver = LinearVariationalSolver(forwardm_expProb,
                                                solver_parameters=hparams)
 
 # Set up the backward scatter
-backwardp_expProb = LinearVariationalProblem(lhs(F0p), rhs(F1p), W0)
+backwardp_expProb = LinearVariationalProblem(lhs(F0p), rhs(F0p), W0,
+                                             constant_jacobian=True)
 backwardp_expsolver = LinearVariationalSolver(backwardp_expProb,
                                                 solver_parameters=hparams)
-backwardm_expProb = LinearVariationalProblem(lhs(F0m), rhs(F1m), W0)
+backwardm_expProb = LinearVariationalProblem(lhs(F0m), rhs(F0m), W0,
+                                             constant_jacobian=True)
 backwardm_expsolver = LinearVariationalSolver(backwardm_expProb,
                                                 solver_parameters=hparams)
 
@@ -178,7 +180,8 @@ else:
 
 #with topography, D = H + eta - b
 
-NProb = LinearVariationalProblem(lhs(L), rhs(L), N)
+NProb = LinearVariationalProblem(lhs(L), rhs(L), N,
+                                 constant_jacobian=True)
 NSolver = LinearVariationalSolver(NProb,
                                   solver_parameters = mparams)
 
@@ -215,7 +218,8 @@ Fp = (
 )*dx
 Fp += (inner(v, w_k*nu) + phi*w_k*neta)*dx
 
-XProbp = LinearVariationalProblem(lhs(Fp), rhs(Fp), X0)
+XProbp = LinearVariationalProblem(lhs(Fp), rhs(Fp), X0,
+                                  constant_jacobian=True)
 Xpsolver = LinearVariationalSolver(XProbp,
                                   solver_parameters = hparams)
 
@@ -226,7 +230,8 @@ Fm = (
 )*dx
 Fm += (inner(v, w_k*nu) + phi*w_k*neta)*dx
 
-XProbm = LinearVariationalProblem(lhs(Fm), rhs(Fm), X0)
+XProbm = LinearVariationalProblem(lhs(Fm), rhs(Fm), X0,
+                                  constant_jacobian=True)
 Xmsolver = LinearVariationalSolver(XProbm,
                                   solver_parameters = hparams)
 
@@ -262,7 +267,7 @@ def average(V, dVdt, positive=True, t=None):
     # backwards gather
     X1.assign(0.)
     for step in range(ns, -1, -1):
-        print('average backward', step, t)
+        print('average backward', step, t, np.sum(weights[step:]))
         # compute N
         NSolver.solve()
         # propagate X back
