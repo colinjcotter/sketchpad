@@ -146,10 +146,10 @@ backwardm_expsolver = LinearVariationalSolver(backwardm_expProb,
 # Set up the nonlinear operator W -> N(W)
 gradperp = lambda f: perp(grad(f))
 n = FacetNormal(mesh)
-Upwind = 0.5 * (sign(dot(u0, n)) + 1)
+Upwind = 0.5 * (sign(dot(u1, n)) + 1)
 both = lambda u: 2*avg(u)
-K = 0.5*inner(u0, u0)
-uup = 0.5 * (dot(u0, n) + abs(dot(u0, n)))
+K = 0.5*inner(u1, u1)
+uup = 0.5 * (dot(u1, n) + abs(dot(u1, n)))
 
 N = Function(W)
 nu, neta = TrialFunctions(W)
