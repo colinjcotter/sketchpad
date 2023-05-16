@@ -245,11 +245,12 @@ Xmsolver = LinearVariationalSolver(XProbm,
 # compute N, use to propagate X back, propagate W back
 # don't need to propagate W back on last step though
 
-svals = 0.5 + np.arange(2*ns)/2/(ns+1)/2 #tvals goes from -rho*dt/2 to rho*dt/2
+svals = 0.5 + np.arange(2*ns)/2/ns/2 #tvals goes from -rho*dt/2 to rho*dt/2
 weights = np.exp(-1.0/svals/(1.0-svals))
 weights = weights[ns:]
 weights[0] /= 2
 weights = weights/np.sum(weights)/2
+weights = np.concatenate((weights, [0]))
 
 # Function to take in current state V and return dV/dt
 def average(V, dVdt, positive=True, t=None):
