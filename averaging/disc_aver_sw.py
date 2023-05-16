@@ -245,11 +245,10 @@ Xmsolver = LinearVariationalSolver(XProbm,
 # compute N, use to propagate X back, propagate W back
 # don't need to propagate W back on last step though
 
-svals = 0.5 + np.arange(2*ns+1)/2/ns/2 #tvals goes from -rho*dt/2 to rho*dt/2
+svals = 0.5 + np.arange(2*ns)/2/(ns+1)/2 #tvals goes from -rho*dt/2 to rho*dt/2
 weights = np.exp(-1.0/svals/(1.0-svals))
 weights = weights[ns:]
 weights[0] /= 2
-weights[-1] = 0.
 weights = weights/np.sum(weights)/2
 
 # Function to take in current state V and return dV/dt
@@ -257,8 +256,7 @@ def average(V, dVdt, positive=True, t=None):
     W0.assign(V)
     # forward scatter
     dt_s.assign(dts)
-    for step in range(ns):
-        print('average forward', step, ns, t)
+    for step in ProgressBar(f'average forward').iter(range(ns)):
         if positive:
             forwardp_expsolver.solve()
         else:
@@ -266,8 +264,7 @@ def average(V, dVdt, positive=True, t=None):
         W0.assign(W1)
     # backwards gather
     X1.assign(0.)
-    for step in range(ns, -1, -1):
-        print('average backward', step, t, np.sum(weights[step:]))
+    for step in ProgressBar(f'average backward').iter(range(ns, -1, -1)):
         # compute N
         NSolver.solve()
         # propagate X back
@@ -292,8 +289,7 @@ def propagate(V_in, V_out, t=None):
     W0.assign(V_in)
     # forward scatter
     dt_s.assign(dt/nt)
-    for step in range(nt):
-        print('propagate', step, nt, t)
+    for step in ProgressBar(f'propagate').iter(range(nt)):
         forwardp_expsolver.solve()
         W0.assign(W1)
     # copy contents
@@ -329,13 +325,15 @@ Ustar = Function(W)
 Average = Function(W)
 
 # set up initial conditions
-U_u, U_eta = U0.split()
+U_u, U_eta = U0.subfunctions
 U_u.assign(un)
 U_eta.assign(etan)
 
 name = args.filename
 file_sw = File(name+'.pvd')
 file_sw.write(un, etan, b)
+
+mass0 = assemble(U_eta*dx)
 
 print ('tmax', tmax, 'dt', dt)
 while t < tmax + 0.5*dt:
@@ -391,6 +389,8 @@ while t < tmax + 0.5*dt:
     # start all over again
     U0.assign(U1)
 
+    print("mass check", mass0, assemble(U_eta*dx))
+    
     if tdump > dumpt - dt*0.5:
         un.assign(U_u)
         etan.assign(U_eta)
