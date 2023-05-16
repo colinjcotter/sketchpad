@@ -334,6 +334,8 @@ name = args.filename
 file_sw = File(name+'.pvd')
 file_sw.write(un, etan, b)
 
+One = Function(V2).assign(1.0)
+Area = assemble(One*dx)
 mass0 = assemble(U_eta*dx)
 
 print ('tmax', tmax, 'dt', dt)
@@ -390,7 +392,7 @@ while t < tmax + 0.5*dt:
     # start all over again
     U0.assign(U1)
 
-    print("mass check", mass0, assemble(U_eta*dx))
+    print("mass error", (mass0-assemble(U_eta*dx))/Area)
     
     if tdump > dumpt - dt*0.5:
         un.assign(U_u)
