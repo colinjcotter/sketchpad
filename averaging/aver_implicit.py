@@ -66,16 +66,15 @@ g = Constant(9.8)  # Gravitational constant
 b = Function(V2, name="Topography")
 c = sqrt(g*H)
 
+v, phi = TestFunctions(W)
+u, eta = TrialFunctions(W)
+
 #Set up the forward and backwards scatter discrete exponential operator
 W0 = Function(W)
 W1 = Function(W)
 u0, eta0 = split(W0)
 u1, eta1 = split(W1)
-#D = eta + b
 
-v, phi = TestFunctions(W)
-
-u, eta = TrialFunctions(W)
 uh = (u0+u)/2
 etah = (eta0+eta)/2
 
@@ -145,6 +144,63 @@ backwardm_expProb = LinearVariationalProblem(lhs(F0m), rhs(F0m), W0,
 backwardm_expsolver = LinearVariationalSolver(backwardm_expProb,
                                                 solver_parameters=hparams)
 
+#linearised variables
+dW0 = Function(W)
+dW1 = Function(W)
+
+#propagators for linearised variables
+u0, eta0 = split(dW0)
+u1, eta1 = split(dW1)
+
+uh = (u0+u)/2
+etah = (eta0+eta)/2
+
+dt_ss = dt_s
+F1p = (
+    inner(v, u - u0) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*etah*div(v)
+    + phi*(eta - eta0) + dt_ss*H*div(uh)*phi
+)*dx
+
+uh = (u+u1)/2
+etah = (eta+eta1)/2
+F0p = (
+    inner(v, u1 - u) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*etah*div(v)
+    + phi*(eta1 - eta) + dt_ss*H*div(uh)*phi
+)*dx
+
+dt_ss = -dt_s
+F1m = (
+    inner(v, u - u0) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*etah*div(v)
+    + phi*(eta - eta0) + dt_ss*H*div(uh)*phi
+)*dx
+
+uh = (u+u1)/2
+etah = (eta+eta1)/2
+F0m = (
+    inner(v, u1 - u) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*etah*div(v)
+    + phi*(eta1 - eta) + dt_ss*H*div(uh)*phi
+)*dx
+
+# Set up the forward scatter
+dforwardp_expProb = LinearVariationalProblem(lhs(F1p), rhs(F1p), dW1,
+                                            constant_jacobian=True)
+dforwardp_expsolver = LinearVariationalSolver(forwardp_expProb,
+                                               solver_parameters=hparams)
+dforwardm_expProb = LinearVariationalProblem(lhs(F1m), rhs(F1m), dW1,
+                                            constant_jacobian=True)
+dforwardm_expsolver = LinearVariationalSolver(forwardm_expProb,
+                                               solver_parameters=hparams)
+
+# Set up the backward scatter
+dbackwardp_expProb = LinearVariationalProblem(lhs(F0p), rhs(F0p), dW0,
+                                             constant_jacobian=True)
+dbackwardp_expsolver = LinearVariationalSolver(backwardp_expProb,
+                                                solver_parameters=hparams)
+dbackwardm_expProb = LinearVariationalProblem(lhs(F0m), rhs(F0m), dW0,
+                                             constant_jacobian=True)
+dbackwardm_expsolver = LinearVariationalSolver(backwardm_expProb,
+                                                solver_parameters=hparams)
+
 # Set up the nonlinear operator W -> N(W)
 gradperp = lambda f: perp(grad(f))
 n = FacetNormal(mesh)
@@ -185,8 +241,20 @@ NProb = LinearVariationalProblem(lhs(L), rhs(L), N,
 NSolver = LinearVariationalSolver(NProb,
                                   solver_parameters = mparams)
 
-#linearised operator
-dL = derivative(L), W1)
+# linearised operator (still solves into N)
+dL = inner(nu, v)*dx + neta*phi*dx + action(derivative(L, W1), dW1)
+
+LNProb = LinearVariationalProblem(lhs(dL), rhs(dL), N,
+                                 constant_jacobian=True)
+LNSolver = LinearVariationalSolver(LNProb,
+                                   solver_parameters = mparams)
+
+# linearised backward Euler solve (still solves into N)
+dL = inner(nu, v)*dx + neta*phi*dx + Constant(dt)*action(derivative(L, W1), N)
+LBENProb = LinearVariationalProblem(lhs(dL), rhs(dL), N,
+                                    constant_jacobian=False)
+LBENSolver = LinearVariationalSolver(LBENProb,
+                                   solver_parameters = mparams)
 
 # Set up the backward gather
 X0 = Function(W)
@@ -287,25 +355,35 @@ def average(V, dVdt, positive=True):
             W1.assign(W0)
     # copy contents
     dVdt.assign(X0)
-
+    
 # Function to take in a perturbation dV and return averaged
-# linearisation of backward Euler action_dN_dV
-def average_linear(dV, action_dN_dV, positive=True):
+# linearisation of backward Euler action_dN_dV at V
+
+def average_linear(V, dV, action_dN_dV, positive=True, PC=False):
+    dW0.assign(dV)
     W0.assign(dV)
     # forward scatter
     dt_s.assign(dts)
     for step in ProgressBar(f'average linear forward').iter(range(ns)):
         if positive:
+            # forward scatter linear
             forwardp_expsolver.solve()
+            dforwardp_expsolver.solve()
         else:
             forwardm_expsolver.solve()
+            dforwardm_expsolver.solve()
         W0.assign(W1)
+        dW0.assign(dW1)
     # backwards gather
     X1.assign(0.)
     for step in ProgressBar(f'average linear backward').iter(range(ns, -1, -1)):
         # Apply linearised operator
-        X1 += W1
-        X1 += assemble(Constant(dt)*action(dL, W1))
+        if PC:
+            LBENSolver.solve()
+        else:
+            LNSolver.solve()
+            N *= Constant(dt)
+            N += dW1
         # propagate X back
         if positive:
             Xpsolver.solve()
@@ -317,9 +395,12 @@ def average_linear(dV, action_dN_dV, positive=True):
             w_k.assign(weights[step])
             if positive:
                 backwardp_expsolver.solve()
+                dbackwardp_expsolver.solve()
             else:
                 backwardm_expsolver.solve()
+                dbackwardm_expsolver.solve()
             W1.assign(W0)
+            dW1.assign(dW0)
     # copy contents
     action_dN_dV.assign(X0)
 
@@ -414,4 +495,11 @@ for k in range(kmax):
     average_linear(dUk, average, positive=False)
     RLin -= average
 
+    # Compute residual
+    COMPUTE RESIDUAL
+    
     # apply the preconditioner
+    average_linear(RLin, average, positive=True, PC=True)
+    dUk -= average
+    average_linear(RLin, average, positive=False, PC=True)
+    dUk -= average
