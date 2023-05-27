@@ -214,6 +214,7 @@ nu, neta = TrialFunctions(W)
 
 vector_invariant = True
 L = inner(nu, v)*dx + neta*phi*dx
+print(action(derivative(L, W1), W1).arguments(), "args")
 if vector_invariant:
     L -= (
         + inner(perp(grad(inner(v, perp(u1)))), u1)*dx
@@ -242,8 +243,10 @@ NSolver = LinearVariationalSolver(NProb,
                                   solver_parameters = mparams)
 
 # linearised operator (still solves into N)
+print(action(derivative(L, W1), W1).arguments(), "args")
 dL = inner(nu, v)*dx + neta*phi*dx + action(derivative(L, W1), dW1)
-
+print('lhs', lhs(dL))
+print('rhs', rhs(dL))
 LNProb = LinearVariationalProblem(lhs(dL), rhs(dL), N,
                                  constant_jacobian=True)
 LNSolver = LinearVariationalSolver(LNProb,
@@ -496,8 +499,9 @@ for k in range(kmax):
     RLin -= average
 
     # Compute residual
-    COMPUTE RESIDUAL
-    
+    residual = norm(RLin)
+    print(residual)
+
     # apply the preconditioner
     average_linear(RLin, average, positive=True, PC=True)
     dUk -= average
