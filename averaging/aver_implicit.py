@@ -245,7 +245,8 @@ NSolver = LinearVariationalSolver(NProb,
                                   solver_parameters = mparams)
 
 # linearised operator (still solves into N)
-dL = inner(nu, v)*dx + neta*phi*dx + action(derivative(L, W1), dW1)
+# want to solve (I + dt*N')N = W1
+dL = inner(nu - u1, v)*dx + (neta - eta1)*phi*dx + action(derivative(L, W1), dW1)
 LNProb = LinearVariationalProblem(lhs(dL), rhs(dL), N,
                                  constant_jacobian=True)
 LNSolver = LinearVariationalSolver(LNProb,
@@ -481,6 +482,8 @@ average(U0, Average, positive=False)
 RNon += dt*Average
 RNon *= -1
 
+print("Finished making RHS for linear system.")
+
 kmax = 5
 dUk.assign(0.)
 for k in range(kmax):
@@ -490,6 +493,7 @@ for k in range(kmax):
     # x^{k+1} = x^k + M^{-1}(b - Ax^k)
 
     # compute linear residual
+    print("Computing linear residual")
     RLin.assign(RNon)
     average_linear(U0, dUk, Average, positive=True)
     RLin -= Average
@@ -498,9 +502,10 @@ for k in range(kmax):
 
     # Compute residual
     residual = norm(RLin)
-    print("Residual", residual)
+    print("Linear Residual", residual)
 
     # apply the preconditioner
+    print("Applying M^{-1}.")
     average_linear(U0, RLin, Average, positive=True, PC=True)
     print("Average positive", norm(Average))
     dUk -= Average
