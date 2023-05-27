@@ -184,21 +184,21 @@ F0m = (
 # Set up the forward scatter
 dforwardp_expProb = LinearVariationalProblem(lhs(F1p), rhs(F1p), dW1,
                                             constant_jacobian=True)
-dforwardp_expsolver = LinearVariationalSolver(forwardp_expProb,
+dforwardp_expsolver = LinearVariationalSolver(dforwardp_expProb,
                                                solver_parameters=hparams)
 dforwardm_expProb = LinearVariationalProblem(lhs(F1m), rhs(F1m), dW1,
                                             constant_jacobian=True)
-dforwardm_expsolver = LinearVariationalSolver(forwardm_expProb,
+dforwardm_expsolver = LinearVariationalSolver(dforwardm_expProb,
                                                solver_parameters=hparams)
 
 # Set up the backward scatter
 dbackwardp_expProb = LinearVariationalProblem(lhs(F0p), rhs(F0p), dW0,
                                              constant_jacobian=True)
-dbackwardp_expsolver = LinearVariationalSolver(backwardp_expProb,
+dbackwardp_expsolver = LinearVariationalSolver(dbackwardp_expProb,
                                                 solver_parameters=hparams)
 dbackwardm_expProb = LinearVariationalProblem(lhs(F0m), rhs(F0m), dW0,
                                              constant_jacobian=True)
-dbackwardm_expsolver = LinearVariationalSolver(backwardm_expProb,
+dbackwardm_expsolver = LinearVariationalSolver(dbackwardm_expProb,
                                                 solver_parameters=hparams)
 
 # Set up the nonlinear operator W -> N(W)
@@ -362,7 +362,7 @@ def average(V, dVdt, positive=True):
     
 # Function to take in a perturbation dV and return averaged
 # linearisation of backward Euler action_dN_dV at V
-print(N, "N")
+
 def average_linear(V, dV, action_dN_dV, positive=True, PC=False):
     dW0.assign(dV)
     W0.assign(V)
