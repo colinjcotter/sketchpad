@@ -202,6 +202,9 @@ dbackwardm_expsolver = LinearVariationalSolver(backwardm_expProb,
                                                 solver_parameters=hparams)
 
 # Set up the nonlinear operator W -> N(W)
+u0, eta0 = split(W0)
+u1, eta1 = split(W1)
+
 gradperp = lambda f: perp(grad(f))
 n = FacetNormal(mesh)
 Upwind = 0.5 * (sign(dot(u1, n)) + 1)
@@ -214,7 +217,7 @@ nu, neta = TrialFunctions(W)
 
 vector_invariant = True
 L = inner(nu, v)*dx + neta*phi*dx
-print(action(derivative(L, W1), W1).arguments(), "args")
+
 if vector_invariant:
     L -= (
         + inner(perp(grad(inner(v, perp(u1)))), u1)*dx
@@ -234,7 +237,6 @@ else:
                      - uup('-')*(eta1('-') - b('-')))*dS
     )
 
-
 #with topography, D = H + eta - b
 
 NProb = LinearVariationalProblem(lhs(L), rhs(L), N,
@@ -243,10 +245,7 @@ NSolver = LinearVariationalSolver(NProb,
                                   solver_parameters = mparams)
 
 # linearised operator (still solves into N)
-print(action(derivative(L, W1), W1).arguments(), "args")
 dL = inner(nu, v)*dx + neta*phi*dx + action(derivative(L, W1), dW1)
-print('lhs', lhs(dL))
-print('rhs', rhs(dL))
 LNProb = LinearVariationalProblem(lhs(dL), rhs(dL), N,
                                  constant_jacobian=True)
 LNSolver = LinearVariationalSolver(LNProb,
