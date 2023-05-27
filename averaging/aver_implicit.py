@@ -360,10 +360,10 @@ def average(V, dVdt, positive=True):
     
 # Function to take in a perturbation dV and return averaged
 # linearisation of backward Euler action_dN_dV at V
-
+print(N, "N")
 def average_linear(V, dV, action_dN_dV, positive=True, PC=False):
     dW0.assign(dV)
-    W0.assign(dV)
+    W0.assign(V)
     # forward scatter
     dt_s.assign(dts)
     for step in ProgressBar(f'average linear forward').iter(range(ns)):
@@ -384,8 +384,7 @@ def average_linear(V, dV, action_dN_dV, positive=True, PC=False):
             LBENSolver.solve()
         else:
             LNSolver.solve()
-            N *= Constant(dt)
-            N += dW1
+            N.assign(Constant(dt)*N + dW1)
         # propagate X back
         if positive:
             Xpsolver.solve()
@@ -457,7 +456,7 @@ RNon = Function(W) # nonlinear residual
 RLin = Function(W) # linear residual
 Average = Function(W) # a place to put the average
 dUk = Function(W) # current estimate of linear increment
-dUkp1 = Function(V) # next estimate of linear increment
+dUkp1 = Function(W) # next estimate of linear increment
 
 # backward Euler notes
 
@@ -492,17 +491,19 @@ for k in range(kmax):
 
     # compute linear residual
     RLin.assign(RNon)
-    average_linear(dUk, average, positive=True)
-    RLin -= average
-    average_linear(dUk, average, positive=False)
-    RLin -= average
+    average_linear(U0, dUk, Average, positive=True)
+    RLin -= Average
+    average_linear(U0, dUk, Average, positive=False)
+    RLin -= Average
 
     # Compute residual
     residual = norm(RLin)
-    print(residual)
+    print("Residual", residual)
 
     # apply the preconditioner
-    average_linear(RLin, average, positive=True, PC=True)
-    dUk -= average
-    average_linear(RLin, average, positive=False, PC=True)
-    dUk -= average
+    average_linear(U0, RLin, Average, positive=True, PC=True)
+    print("Average positive", norm(Average))
+    dUk -= Average
+    average_linear(U0, RLin, Average, positive=False, PC=True)
+    print("Average negative", norm(Average))
+    dUk -= Average
