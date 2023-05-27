@@ -246,15 +246,15 @@ NSolver = LinearVariationalSolver(NProb,
 
 # linearised operator (still solves into N)
 # want to solve (I + dt*N')N = W1
-du1, eta1 = split(dW1)
-dL = inner(nu - du1, v)*dx + (neta - deta1)*phi*dx + action(derivative(L, W1), dW1)
+dL = inner(nu, v)*dx + neta*phi*dx + Constant(dt)*action(derivative(L, W1), dW1)
 LNProb = LinearVariationalProblem(lhs(dL), rhs(dL), N,
                                  constant_jacobian=True)
 LNSolver = LinearVariationalSolver(LNProb,
                                    solver_parameters = mparams)
 
 # linearised backward Euler solve (still solves into N)
-dL = inner(nu, v)*dx + neta*phi*dx + Constant(dt)*action(derivative(L, W1), N)
+du1, deta1 = split(dW1)
+dL = inner(nu - du1, v)*dx + (neta - deta1)*phi*dx + Constant(dt)*action(derivative(L, W1), N)
 LBENProb = LinearVariationalProblem(lhs(dL), rhs(dL), N,
                                     constant_jacobian=False)
 LBENSolver = LinearVariationalSolver(LBENProb,
