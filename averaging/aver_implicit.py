@@ -246,7 +246,8 @@ NSolver = LinearVariationalSolver(NProb,
 
 # linearised operator (still solves into N)
 # want to solve (I + dt*N')N = W1
-dL = inner(nu - u1, v)*dx + (neta - eta1)*phi*dx + action(derivative(L, W1), dW1)
+du1, eta1 = split(dW1)
+dL = inner(nu - du1, v)*dx + (neta - deta1)*phi*dx + action(derivative(L, W1), dW1)
 LNProb = LinearVariationalProblem(lhs(dL), rhs(dL), N,
                                  constant_jacobian=True)
 LNSolver = LinearVariationalSolver(LNProb,
