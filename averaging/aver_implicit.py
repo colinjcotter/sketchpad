@@ -15,6 +15,7 @@ parser.add_argument('--ns', type=int, default=10, help='Number of s steps in exp
 parser.add_argument('--nt', type=int, default=10, help='Number of t steps in exponential approximation for time propagator')
 parser.add_argument('--alpha', type=float, default=1, help='Averaging window width as a multiple of dt. Default 1.')
 parser.add_argument('--filename', type=str, default='w2', help='filename for pvd')
+parser.add_argument('--scale', type=float, default=1.0, help='scale factor for stationary iteration')
 parser.add_argument('--check', action="store_true", help='print out some information about frequency resolution and exit')
 
 args = parser.parse_known_args()
@@ -28,6 +29,7 @@ dts = alpha*dt/args.ns
 dt_s = Constant(dts)
 ns = args.ns
 nt = args.nt
+scale = Constant(args.scale)
 
 if args.check:
     eigs = [0.003465, 0.007274, 0.014955] #maximum frequency for ref 3-5
@@ -391,7 +393,6 @@ def average_linear(V, dV, action_dN_dV, positive=True, PC=False):
             LBENSolver.solve()
         else:
             LNSolver.solve()
-            N.assign(Constant(dt)*N + dW1)
         # propagate X back
         if positive:
             Xpsolver.solve()
@@ -492,6 +493,7 @@ print("Finished making RHS for linear system.")
 
 kmax = 5
 dUk.assign(0.)
+One = Function(V2).assign(1.0)
 for k in range(kmax):
     # solving Ax = b by iterating
     # Mx^{k+1} = (M-A)x^k + b
@@ -507,14 +509,14 @@ for k in range(kmax):
     RLin -= Average
 
     # Compute residual
-    residual = norm(RLin)
-    print("Linear Residual", residual)
+    residual = norm(RLin)/norm(One)
+    if k == 0:
+        residual0 = residual
+    print("Linear Residual (relative)", residual/residual0)
 
     # apply the preconditioner
     print("Applying M^{-1}.")
     average_linear(U0, RLin, Average, positive=True, PC=True)
-    print("Average positive", norm(Average))
-    dUk += Average
+    dUk += scale*Average
     average_linear(U0, RLin, Average, positive=False, PC=True)
-    print("Average negative", norm(Average))
-    dUk += Average
+    dUk += scale*Average
