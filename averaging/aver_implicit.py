@@ -17,6 +17,7 @@ parser.add_argument('--alpha', type=float, default=1, help='Averaging window wid
 parser.add_argument('--filename', type=str, default='w2', help='filename for pvd')
 parser.add_argument('--scale', type=float, default=1.0, help='scale factor for stationary iteration')
 parser.add_argument('--check', action="store_true", help='print out some information about frequency resolution and exit')
+parser.add_argument('--kmax',type=int, default=5, help='number of stationary iterations. Default 5.')
 
 args = parser.parse_known_args()
 args = args[0]
@@ -491,7 +492,7 @@ RNon *= -1
 
 print("Finished making RHS for linear system.")
 
-kmax = 5
+kmax = args.kmax
 dUk.assign(0.)
 One = Function(V2).assign(1.0)
 for k in range(kmax):
