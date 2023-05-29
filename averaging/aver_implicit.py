@@ -514,7 +514,7 @@ for k in range(kmax):
     print("Applying M^{-1}.")
     average_linear(U0, RLin, Average, positive=True, PC=True)
     print("Average positive", norm(Average))
-    dUk -= Average
+    dUk += Average
     average_linear(U0, RLin, Average, positive=False, PC=True)
     print("Average negative", norm(Average))
-    dUk -= Average
+    dUk += Average
