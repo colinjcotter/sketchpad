@@ -16,6 +16,7 @@ parser.add_argument('--nt', type=int, default=10, help='Number of t steps in exp
 parser.add_argument('--alpha', type=float, default=1, help='Averaging window width as a multiple of dt. Default 1.')
 parser.add_argument('--filename', type=str, default='w2', help='filename for pvd')
 parser.add_argument('--scale', type=float, default=1.0, help='scale factor for stationary iteration')
+parser.add_argument('--advection', action="store_false", help='include mean flow advection in L')
 parser.add_argument('--check', action="store_true", help='print out some information about frequency resolution and exit')
 parser.add_argument('--kmax',type=int, default=5, help='number of stationary iterations. Default 5.')
 
@@ -81,11 +82,31 @@ u1, eta1 = split(W1)
 uh = (u0+u)/2
 etah = (eta0+eta)/2
 
+if args.advection:
+    ubar = Function(V1)
+
+def advection(F, ubar, v, vector=False):
+    """
+    Advection of F by ubar using test function v
+    """
+    L = -inner(div(outer(v, ubar)), F)*dx
+    n = FacetNormal(domain.mesh)
+    un = 0.5*(dot(ubar, n) + abs(dot(ubar, n)))
+    L += dot(jump(v), (un('+')*F('+') - un('-')*F('-')))*dS
+    if vector:
+        L += un('+')*inner(v('-'), n('+')+n('-'))*inner(F('+'), n('+'))*dS
+        L += un('-')*inner(v('+'), n('+')+n('-'))*inner(F('-'), n('-'))*dS
+    return L
+
 dt_ss = dt_s
 F1p = (
     inner(v, u - u0) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*etah*div(v)
     + phi*(eta - eta0) + dt_ss*H*div(uh)*phi
 )*dx
+
+if args.advection:
+    F1p += dt_ss*advection(uh, ubar, v, vector=True)
+    F1p += dt_ss*advection(etah, ubar, phi, vector=False)
 
 uh = (u+u1)/2
 etah = (eta+eta1)/2
@@ -94,11 +115,19 @@ F0p = (
     + phi*(eta1 - eta) + dt_ss*H*div(uh)*phi
 )*dx
 
+if args.advection:
+    F0p += dt_ss*advection(uh, ubar, v, vector=True)
+    F0p += dt_ss*advection(etah, ubar, phi, vector=False)
+
 dt_ss = -dt_s
 F1m = (
     inner(v, u - u0) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*etah*div(v)
     + phi*(eta - eta0) + dt_ss*H*div(uh)*phi
 )*dx
+
+if args.advection:
+    F1m += dt_ss*advection(uh, ubar, v, vector=True)
+    F1m += dt_ss*advection(etah, ubar, phi, vector=False)
 
 uh = (u+u1)/2
 etah = (eta+eta1)/2
@@ -106,6 +135,10 @@ F0m = (
     inner(v, u1 - u) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*etah*div(v)
     + phi*(eta1 - eta) + dt_ss*H*div(uh)*phi
 )*dx
+
+if args.advection:
+    F0m += dt_ss*advection(uh, ubar, v, vector=True)
+    F0m += dt_ss*advection(etah, ubar, phi, vector=False)
 
 hparams = {
     'mat_type': 'matfree',
@@ -164,6 +197,10 @@ F1p = (
     + phi*(eta - eta0) + dt_ss*H*div(uh)*phi
 )*dx
 
+if args.advection:
+    F1p += dt_ss*advection(uh, ubar, v, vector=True)
+    F1p += dt_ss*advection(etah, ubar, phi, vector=False)
+
 uh = (u+u1)/2
 etah = (eta+eta1)/2
 F0p = (
@@ -171,11 +208,19 @@ F0p = (
     + phi*(eta1 - eta) + dt_ss*H*div(uh)*phi
 )*dx
 
+if args.advection:
+    F0p += dt_ss*advection(uh, ubar, v, vector=True)
+    F0p += dt_ss*advection(etah, ubar, phi, vector=False)
+
 dt_ss = -dt_s
 F1m = (
     inner(v, u - u0) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*etah*div(v)
     + phi*(eta - eta0) + dt_ss*H*div(uh)*phi
 )*dx
+
+if args.advection:
+    F1m += dt_ss*advection(uh, ubar, v, vector=True)
+    F1m += dt_ss*advection(etah, ubar, phi, vector=False)
 
 uh = (u+u1)/2
 etah = (eta+eta1)/2
@@ -183,6 +228,10 @@ F0m = (
     inner(v, u1 - u) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*etah*div(v)
     + phi*(eta1 - eta) + dt_ss*H*div(uh)*phi
 )*dx
+
+if args.advection:
+    F0m += dt_ss*advection(uh, ubar, v, vector=True)
+    F0m += dt_ss*advection(etah, ubar, phi, vector=False)
 
 # Set up the forward scatter
 dforwardp_expProb = LinearVariationalProblem(lhs(F1p), rhs(F1p), dW1,
@@ -240,6 +289,11 @@ else:
                      - uup('-')*(eta1('-') - b('-')))*dS
     )
 
+if args.advection:
+    L += advection(u1, u1 - ubar, v, vector=True)
+    L += advection(eta1, u1 - ubar, phi, vector=False)
+
+    
 #with topography, D = H + eta - b
 
 NProb = LinearVariationalProblem(lhs(L), rhs(L), N,
@@ -301,6 +355,10 @@ Fp = (
 )*dx
 Fp += (inner(v, w_k*nu) + phi*w_k*neta)*dx
 
+if args.advection:
+    Fp += dt_ss*advection(uh, ubar, v, vector=True)
+    Fp += dt_ss*advection(etah, ubar, phi, vector=False)
+
 XProbp = LinearVariationalProblem(lhs(Fp), rhs(Fp), X0,
                                   constant_jacobian=True)
 Xpsolver = LinearVariationalSolver(XProbp,
@@ -312,6 +370,10 @@ Fm = (
     + phi*(eta1 - eta) + dt_ss*H*div(uh)*phi
 )*dx
 Fm += (inner(v, w_k*nu) + phi*w_k*neta)*dx
+
+if args.advection:
+    Fm += dt_ss*advection(uh, ubar, v, vector=True)
+    Fm += dt_ss*advection(etah, ubar, phi, vector=False)
 
 XProbm = LinearVariationalProblem(lhs(Fm), rhs(Fm), X0,
                                   constant_jacobian=True)
@@ -437,6 +499,7 @@ u_max = Constant(u_0)
 u_expr = as_vector([-u_max*x[1]/R0, u_max*x[0]/R0, 0.0])
 eta_expr = - ((R0 * Omega * u_max + u_max*u_max/2.0)*(x[2]*x[2]/(R0*R0)))/g
 un = Function(V1, name="Velocity").project(u_expr)
+ubar.project(u_expr)
 etan = Function(V2, name="Elevation").project(eta_expr)
 
 # Topography

@@ -16,6 +16,8 @@ parser.add_argument('--nt', type=int, default=10, help='Number of t steps in exp
 parser.add_argument('--alpha', type=float, default=1, help='Averaging window width as a multiple of dt. Default 1.')
 parser.add_argument('--filename', type=str, default='w2', help='filename for pvd')
 parser.add_argument('--check', action="store_true", help='print out some information about frequency resolution and exit')
+parser.add_argument('--advection', action="store_true", help='include mean flow advection in L.')
+parser.add_argument('--vector_invariant', action="store_true", help='use vector invariant form.')
 
 args = parser.parse_known_args()
 args = args[0]
@@ -75,6 +77,25 @@ u1, eta1 = split(W1)
 
 v, phi = TestFunctions(W)
 
+if args.advection:
+    ubar = Function(V1)
+
+def advection(F, ubar, v, vector=False, upwind=True):
+    """
+    Advection of F by ubar using test function v
+    """
+    L = -inner(div(outer(v, ubar)), F)*dx
+    n = FacetNormal(domain.mesh)
+    if upwind:
+        un = 0.5*(dot(ubar, n) + abs(dot(ubar, n)))
+    else:
+        un = 0.5*(dot(ubar, n) - abs(dot(ubar, n)))
+    L += dot(jump(v), (un('+')*F('+') - un('-')*F('-')))*dS
+    if vector:
+        L += un('+')*inner(v('-'), n('+')+n('-'))*inner(F('+'), n('+'))*dS
+        L += un('-')*inner(v('+'), n('+')+n('-'))*inner(F('-'), n('-'))*dS
+    return L
+
 u, eta = TrialFunctions(W)
 uh = (u0+u)/2
 etah = (eta0+eta)/2
@@ -85,6 +106,10 @@ F1p = (
     + phi*(eta - eta0) + dt_ss*H*div(uh)*phi
 )*dx
 
+if args.advection:
+    F1p += dt_ss*advection(uh, ubar, v, vector=True)
+    F1p += dt_ss*advection(etah, ubar, phi, vector=False)
+
 uh = (u+u1)/2
 etah = (eta+eta1)/2
 F0p = (
@@ -92,11 +117,19 @@ F0p = (
     + phi*(eta1 - eta) + dt_ss*H*div(uh)*phi
 )*dx
 
+if args.advection:
+    F0p += dt_ss*advection(uh, ubar, v, vector=True)
+    F0p += dt_ss*advection(etah, ubar, phi, vector=False)
+
 dt_ss = -dt_s
 F1m = (
     inner(v, u - u0) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*etah*div(v)
     + phi*(eta - eta0) + dt_ss*H*div(uh)*phi
 )*dx
+
+if args.advection:
+    F1m += dt_ss*advection(uh, ubar, v, vector=True)
+    F1m += dt_ss*advection(etah, ubar, phi, vector=False)
 
 uh = (u+u1)/2
 etah = (eta+eta1)/2
@@ -105,6 +138,10 @@ F0m = (
     + phi*(eta1 - eta) + dt_ss*H*div(uh)*phi
 )*dx
 
+if args.advection:
+    F0m += dt_ss*advection(uh, ubar, v, vector=True)
+    F0m += dt_ss*advection(etah, ubar, phi, vector=False)
+    
 hparams = {
     'mat_type': 'matfree',
     'ksp_type': 'preonly',
@@ -125,25 +162,62 @@ mparams = {
     'fieldsplit_1_sub_pc_type':'ilu'
 }
 
+monoparameters = {
+    #"snes_monitor": None,
+    "mat_type": "matfree",
+    "ksp_type": "fgmres",
+    #"ksp_monitor_true_residual": None,
+    #"ksp_converged_reason": None,
+    "ksp_atol": 1e-8,
+    "ksp_rtol": 1e-8,
+    "ksp_max_it": 400,
+    "pc_type": "mg",
+    "pc_mg_cycle_type": "v",
+    "pc_mg_type": "multiplicative",
+    "mg_levels_ksp_type": "gmres",
+    "mg_levels_ksp_max_it": 3,
+    #"mg_levels_ksp_convergence_test": "skip",
+    "mg_levels_pc_type": "python",
+    "mg_levels_pc_python_type": "firedrake.PatchPC",
+    "mg_levels_patch_pc_patch_save_operators": True,
+    "mg_levels_patch_pc_patch_partition_of_unity": True,
+    "mg_levels_patch_pc_patch_sub_mat_type": "seqdense",
+    "mg_levels_patch_pc_patch_construct_dim": 0,
+    "mg_levels_patch_pc_patch_construct_type": "star",
+    "mg_levels_patch_pc_patch_local_type": "additive",
+    "mg_levels_patch_pc_patch_precompute_element_tensors": True,
+    "mg_levels_patch_pc_patch_symmetrise_sweep": False,
+    "mg_levels_patch_sub_ksp_type": "preonly",
+    "mg_levels_patch_sub_pc_type": "lu",
+    "mg_levels_patch_sub_pc_factor_shift_type": "nonzero",
+    "mg_coarse_pc_type": "python",
+    "mg_coarse_pc_python_type": "firedrake.AssembledPC",
+    "mg_coarse_assembled_pc_type": "lu",
+    "mg_coarse_assembled_pc_factor_mat_solver_type": "mumps",
+}
+
+
+params = monoparameters
+
 # Set up the forward scatter
 forwardp_expProb = LinearVariationalProblem(lhs(F1p), rhs(F1p), W1,
                                             constant_jacobian=True)
 forwardp_expsolver = LinearVariationalSolver(forwardp_expProb,
-                                               solver_parameters=hparams)
+                                               solver_parameters=params)
 forwardm_expProb = LinearVariationalProblem(lhs(F1m), rhs(F1m), W1,
                                             constant_jacobian=True)
 forwardm_expsolver = LinearVariationalSolver(forwardm_expProb,
-                                               solver_parameters=hparams)
+                                               solver_parameters=params)
 
 # Set up the backward scatter
 backwardp_expProb = LinearVariationalProblem(lhs(F0p), rhs(F0p), W0,
                                              constant_jacobian=True)
 backwardp_expsolver = LinearVariationalSolver(backwardp_expProb,
-                                                solver_parameters=hparams)
+                                                solver_parameters=params)
 backwardm_expProb = LinearVariationalProblem(lhs(F0m), rhs(F0m), W0,
                                              constant_jacobian=True)
 backwardm_expsolver = LinearVariationalSolver(backwardm_expProb,
-                                                solver_parameters=hparams)
+                                                solver_parameters=params)
 
 # Set up the nonlinear operator W -> N(W)
 gradperp = lambda f: perp(grad(f))
@@ -169,14 +243,12 @@ if vector_invariant:
                      - uup('-')*(eta1('-') - b('-')))*dS
     )
 else:
-    L -= (
-        + inner(div(outer(u1, v)), u1)*dx
-        - inner(both(inner(n, u1)*v), both(Upwind*u1))*dS
-        + inner(grad(phi), u1*(eta1-b))*dx
-        - jump(phi)*(uup('+')*(eta1('+')-b('+'))
-                     - uup('-')*(eta1('-') - b('-')))*dS
-    )
+    L = advection(u1, u1, v, vector=True)
+    L -= advection(eta1, u1, phi, vector=False)
 
+if args.advection:
+    L -= advection(u1, ubar, v, vector=True)
+    L -= advection(eta1, ubar, phi, vector=False)    
 
 #with topography, D = H + eta - b
 
@@ -217,11 +289,14 @@ Fp = (
     + phi*(eta1 - eta) + dt_ss*H*div(uh)*phi
 )*dx
 Fp += (inner(v, w_k*nu) + phi*w_k*neta)*dx
+if args.advection:
+    Fp += dt_ss*advection(uh, ubar, v, vector=True)
+    Fp += dt_ss*advection(etah, ubar, phi, vector=False)
 
 XProbp = LinearVariationalProblem(lhs(Fp), rhs(Fp), X0,
                                   constant_jacobian=True)
 Xpsolver = LinearVariationalSolver(XProbp,
-                                  solver_parameters = hparams)
+                                  solver_parameters = params)
 
 dt_ss = -dt_s
 Fm = (
@@ -233,7 +308,10 @@ Fm += (inner(v, w_k*nu) + phi*w_k*neta)*dx
 XProbm = LinearVariationalProblem(lhs(Fm), rhs(Fm), X0,
                                   constant_jacobian=True)
 Xmsolver = LinearVariationalSolver(XProbm,
-                                  solver_parameters = hparams)
+                                  solver_parameters = params)
+if args.advection:
+    Fm += dt_ss*advection(uh, ubar, v, vector=True)
+    Fm += dt_ss*advection(etah, ubar, phi, vector=False)
 
 # total number of points is 2ns + 1, because we have s=0
 # after forward loop, W1 contains value at time ns*ds
@@ -308,6 +386,8 @@ u_max = Constant(u_0)
 u_expr = as_vector([-u_max*x[1]/R0, u_max*x[0]/R0, 0.0])
 eta_expr = - ((R0 * Omega * u_max + u_max*u_max/2.0)*(x[2]*x[2]/(R0*R0)))/g
 un = Function(V1, name="Velocity").project(u_expr)
+if args.advection:
+    ubar.project(u_expr)
 etan = Function(V2, name="Elevation").project(eta_expr)
 
 # Topography
