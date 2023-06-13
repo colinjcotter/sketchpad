@@ -148,13 +148,16 @@ if args.advection:
     F0m += dt_ss*advection(etah, ubar, phi, continuity=True, vector=False)
     
 hparams = {
+    "snes_lag_jacobian": -2, 
     'mat_type': 'matfree',
-    'ksp_type': 'preonly',
+    'ksp_type': 'gmres',
+    #'ksp_monitor': None,
     'pc_type': 'python',
     'pc_python_type': 'firedrake.HybridizationPC',
     'hybridization': {'ksp_type': 'preonly',
-                      'pc_type': 'lu',
-                      'pc_factor_mat_solver_type': 'mumps'}}
+                      'pc_type': 'bjacobi',
+                      'sub_pc_type': 'ilu'
+                      }}
 mparams = {
     #'ksp_monitor': None,
     'ksp_type': 'preonly',
@@ -172,6 +175,7 @@ monoparameters = {
     "snes_lag_jacobian": -2, 
     "mat_type": "matfree",
     "ksp_type": "fgmres",
+    'ksp_monitor': None,
     #"ksp_monitor_true_residual": None,
     #"ksp_converged_reason": None,
     "ksp_atol": 1e-8,
@@ -203,7 +207,8 @@ monoparameters = {
 }
 
 
-params = monoparameters
+#params = monoparameters
+params = hparams
 
 # Set up the forward scatter
 forwardp_expProb = LinearVariationalProblem(lhs(F1p), rhs(F1p), W1,
