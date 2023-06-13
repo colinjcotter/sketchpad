@@ -80,12 +80,15 @@ v, phi = TestFunctions(W)
 if args.advection:
     ubar = Function(V1)
 
-def advection(F, ubar, v, vector=False, upwind=True):
+def advection(F, ubar, v, continuity=False, vector=False, upwind=True):
     """
     Advection of F by ubar using test function v
     """
     L = -inner(div(outer(v, ubar)), F)*dx
-    n = FacetNormal(domain.mesh)
+    if continuity:
+        L += inner(v, div(ubar)*F)*dx
+    
+    n = FacetNormal(mesh)
     if upwind:
         un = 0.5*(dot(ubar, n) + abs(dot(ubar, n)))
     else:
@@ -118,8 +121,9 @@ F0p = (
 )*dx
 
 if args.advection:
-    F0p += dt_ss*advection(uh, ubar, v, vector=True)
-    F0p += dt_ss*advection(etah, ubar, phi, vector=False)
+    F0p += dt_ss*advection(uh, ubar, v, vector=True, upwind=False)
+    F0p += dt_ss*advection(etah, ubar, phi, vector=False,
+                           continuity=True, upwind=False)
 
 dt_ss = -dt_s
 F1m = (
@@ -128,8 +132,9 @@ F1m = (
 )*dx
 
 if args.advection:
-    F1m += dt_ss*advection(uh, ubar, v, vector=True)
-    F1m += dt_ss*advection(etah, ubar, phi, vector=False)
+    F1m += dt_ss*advection(uh, ubar, v, vector=True, upwind=False)
+    F1m += dt_ss*advection(etah, ubar, phi, vector=False,
+                           continuity=True, upwind=False)
 
 uh = (u+u1)/2
 etah = (eta+eta1)/2
@@ -140,7 +145,7 @@ F0m = (
 
 if args.advection:
     F0m += dt_ss*advection(uh, ubar, v, vector=True)
-    F0m += dt_ss*advection(etah, ubar, phi, vector=False)
+    F0m += dt_ss*advection(etah, ubar, phi, continuity=True, vector=False)
     
 hparams = {
     'mat_type': 'matfree',
@@ -164,6 +169,7 @@ mparams = {
 
 monoparameters = {
     #"snes_monitor": None,
+    "snes_lag_jacobian": -2, 
     "mat_type": "matfree",
     "ksp_type": "fgmres",
     #"ksp_monitor_true_residual": None,
@@ -175,7 +181,7 @@ monoparameters = {
     "pc_mg_cycle_type": "v",
     "pc_mg_type": "multiplicative",
     "mg_levels_ksp_type": "gmres",
-    "mg_levels_ksp_max_it": 3,
+    "mg_levels_ksp_max_it": 2,
     #"mg_levels_ksp_convergence_test": "skip",
     "mg_levels_pc_type": "python",
     "mg_levels_pc_python_type": "firedrake.PatchPC",
@@ -230,7 +236,7 @@ uup = 0.5 * (dot(u1, n) + abs(dot(u1, n)))
 N = Function(W)
 nu, neta = TrialFunctions(W)
 
-vector_invariant = True
+vector_invariant = args.vector_invariant
 L = inner(nu, v)*dx + neta*phi*dx
 if vector_invariant:
     L -= (
@@ -243,12 +249,12 @@ if vector_invariant:
                      - uup('-')*(eta1('-') - b('-')))*dS
     )
 else:
-    L = advection(u1, u1, v, vector=True)
-    L -= advection(eta1, u1, phi, vector=False)
+    L += advection(u1, u1, v, vector=True)
+    L += advection(eta1 - b, u1, phi, continuity=True, vector=False)
 
 if args.advection:
     L -= advection(u1, ubar, v, vector=True)
-    L -= advection(eta1, ubar, phi, vector=False)    
+    L -= advection(eta1, ubar, phi, continuity=True, vector=False)
 
 #with topography, D = H + eta - b
 
@@ -291,7 +297,7 @@ Fp = (
 Fp += (inner(v, w_k*nu) + phi*w_k*neta)*dx
 if args.advection:
     Fp += dt_ss*advection(uh, ubar, v, vector=True)
-    Fp += dt_ss*advection(etah, ubar, phi, vector=False)
+    Fp += dt_ss*advection(etah, ubar, phi, continuity=True, vector=False)
 
 XProbp = LinearVariationalProblem(lhs(Fp), rhs(Fp), X0,
                                   constant_jacobian=True)
@@ -304,14 +310,14 @@ Fm = (
     + phi*(eta1 - eta) + dt_ss*H*div(uh)*phi
 )*dx
 Fm += (inner(v, w_k*nu) + phi*w_k*neta)*dx
+if args.advection:
+    Fm += dt_ss*advection(uh, ubar, v, vector=True)
+    Fm += dt_ss*advection(etah, ubar, phi, continuity=True, vector=False)
 
 XProbm = LinearVariationalProblem(lhs(Fm), rhs(Fm), X0,
                                   constant_jacobian=True)
 Xmsolver = LinearVariationalSolver(XProbm,
                                   solver_parameters = params)
-if args.advection:
-    Fm += dt_ss*advection(uh, ubar, v, vector=True)
-    Fm += dt_ss*advection(etah, ubar, phi, vector=False)
 
 # total number of points is 2ns + 1, because we have s=0
 # after forward loop, W1 contains value at time ns*ds
