@@ -34,6 +34,7 @@ class ALWaveSchurPC(PCBase):
 
         self.xf = Function(Q) # input to apply
         self.yf = Function(Q) # output to apply
+        self.zf = Function(Q) # input to all at once mass system
         
         # set up Riesz map to a function from self.xf to r
         self.r = Function(Q)
@@ -59,11 +60,11 @@ class ALWaveSchurPC(PCBase):
         self.delta_solver = LinearVariationalSolver(delta_prob,
                                                     solver_parameters=dparams)
 
-        # Then apply divergence via projection from self.delta_r to self.yf
+        # Then apply divergence via projection from self.delta_r to self.zf
         self.divergence_projector = Projector(div(self.delta_r),
-                                              self.yf,
+                                              self.zf,
                                               solver_parameters=dparams)
-        
+
     def update(self, pc):
         pass
 
@@ -79,8 +80,13 @@ class ALWaveSchurPC(PCBase):
         # Then apply divergence via projection from self.delta_r to self.yf
         self.divergence_projector.project()
         # rescale with coefficients
+        print("Applying")
+        self.zf *= -gamma*dt/2
 
-        self.yf *= -gamma*dt/2
+        # finally, solve the all at once system with zf using back substitution
+        self.yf[0].assign(self.zf[0])
+        for i in range(1, ntime):
+            self.yf[i].assign(self.yf[i-1] + self.zf[i])
         
         with self.yf.dat.vec_ro as v:
             v.copy(Y)
@@ -95,7 +101,7 @@ x, y = SpatialCoordinate(mesh)
 
 u0 = Function(V0).interpolate(as_vector([cos(sin(2*pi*x)+cos(pi*y))+exp(cos(4*pi*y)),x*y]))
 p0 = Function(Q0).interpolate(exp(sin(pi*x)*sin(pi*y)))
-One = Function(Q).assign(1.0)
+One = Function(Q0).assign(1.0)
 p0 -= assemble(p0*dx)/assemble(One*dx)
 
 for i in range(ntime):
@@ -105,11 +111,11 @@ for i in range(ntime):
     p1 = p[i]
     if i > 0:
         u0 = u[i-1, :]
-        p0 = p[i-1, :]
-    eqn0 = (inner(vp, u1 - u0) - dt*div(vp)*(p1 + p0)/2 + q*(p1 - p0)
-       + dt*q*div((u1+u0)/2))*dx
+        p0 = p[i-1]
+    eqn0 = (inner(vp, u1 - u0) - dt*div(vp)*(p1 + p0)/2 + qp*(p1 - p0)
+       + dt*qp*div((u1+u0)/2))*dx
     # the gamma term
-    eqn += (gamma*div(vp)*(p1 - p0) + dt*div((u1+u0)/2))*dx
+    eqn0 += (gamma*div(vp)*(p1 - p0) + dt*div((u1+u0)/2))*dx
 
     if i == 0:
         eqn = eqn0
@@ -123,6 +129,8 @@ luparams = {
     'pc_type':'lu',
     'pc_factor_mat_solver_type':'mumps'
 }
+
+# Note, we could also solve the 0 block using back substitution
 
 schur_params = {
     'ksp_type': 'gmres',
