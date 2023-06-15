@@ -103,19 +103,19 @@ schur_params = {
     #'ksp_view': None,
     'ksp_type': 'fgmres',
     'ksp_monitor': None,
-    'ksp_monitor_true_residual': None,
+    #'ksp_monitor_true_residual': None,
     'pc_type':'fieldsplit',
     "pc_fieldsplit_type": "schur",
     "pc_fieldsplit_schur_fact_type": "full",
     "fieldsplit_0_ksp_type": "preonly",
     "fieldsplit_0_pc_type": "lu",
-    "fieldsplit_1_ksp_type": "gmres",
+    "fieldsplit_1_ksp_type": "preonly",
     "fieldsplit_1_ksp_max_it": 1,
     "fieldsplit_1_pc_type": "python",
     "fieldsplit_1_pc_python_type": "__main__.ALWaveSchurPC"
 }
 
-v_basis = VectorSpaceBasis(constant=True)
+v_basis = VectorSpaceBasis(constant=True, comm=COMM_WORLD)
 nullspace = MixedVectorSpaceBasis(W, [W.sub(0), v_basis])
 w1 = Function(W)
 zvec = as_vector((Constant(0.), Constant(0.)))
