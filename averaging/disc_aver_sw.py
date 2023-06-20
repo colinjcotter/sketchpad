@@ -84,10 +84,11 @@ def advection(F, ubar, v, continuity=False, vector=False, upwind=True):
     """
     Advection of F by ubar using test function v
     """
-    L = -inner(div(outer(v, ubar)), F)*dx
+
     if continuity:
-        L += inner(v, div(ubar)*F)*dx
-    
+        L = -inner(grad(v), outer(ubar, F))*dx
+    else:
+        L = -inner(div(outer(v, ubar)), F)*dx
     n = FacetNormal(mesh)
     if upwind:
         un = 0.5*(dot(ubar, n) + abs(dot(ubar, n)))
@@ -111,7 +112,8 @@ F1p = (
 
 if args.advection:
     F1p += dt_ss*advection(uh, ubar, v, vector=True)
-    F1p += dt_ss*advection(etah, ubar, phi, vector=False)
+    F1p += dt_ss*advection(etah, ubar, phi,
+                           continuity=True, vector=False)
 
 uh = (u+u1)/2
 etah = (eta+eta1)/2
@@ -175,7 +177,7 @@ monoparameters = {
     "snes_lag_jacobian": -2, 
     "mat_type": "matfree",
     "ksp_type": "fgmres",
-    'ksp_monitor': None,
+    #'ksp_monitor': None,
     #"ksp_monitor_true_residual": None,
     #"ksp_converged_reason": None,
     "ksp_atol": 1e-8,
@@ -207,8 +209,8 @@ monoparameters = {
 }
 
 
-#params = monoparameters
-params = hparams
+params = monoparameters
+#params = hparams
 
 # Set up the forward scatter
 forwardp_expProb = LinearVariationalProblem(lhs(F1p), rhs(F1p), W1,
@@ -418,6 +420,7 @@ Average = Function(W)
 
 # set up initial conditions
 U_u, U_eta = U0.subfunctions
+U1_u, U1_eta = U1.subfunctions
 U_u.assign(un)
 U_eta.assign(etan)
 

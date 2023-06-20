@@ -83,34 +83,29 @@ v, q = TestFunctions(W)
 x, y = SpatialCoordinate(mesh)
 
 u0 = Function(V).interpolate(as_vector([cos(sin(2*pi*x)+cos(pi*y))+exp(cos(4*pi*y)),x*y]))
-p0 = Function(Q).interpolate(exp(sin(pi*x)*sin(pi*y)))
+p0 = Function(Q)#.interpolate(exp(sin(pi*x)*sin(pi*y)))
 One = Function(Q).assign(1.0)
 p0 -= assemble(p0*dx)/assemble(One*dx)
-eqn = (inner(v,u - u0) - dt*div(v)*(p + p0)/2 + q*(p - p0)
+eqn0 = (inner(v,u - u0) - dt*div(v)*(p + p0)/2 + q*(p - p0)
        + dt*q*div((u+u0)/2))*dx
 # the gamma term
-eqn += gamma*div(v)*(p - p0 + dt*div((u+u0)/2))*dx
-
-luparams = {
-    'mat_type': 'aij',
-    'ksp_type': 'gmres',
-    'ksp_monitor': None,
-    'pc_type':'lu',
-    'pc_factor_mat_solver_type':'mumps'
-}
+eqn = eqn0 + gamma*div(v)*(p - p0 + dt*div((u+u0)/2))*dx
 
 schur_params = {
     #'ksp_view': None,
     'ksp_type': 'fgmres',
     'ksp_monitor': None,
-    #'ksp_monitor_true_residual': None,
+    'ksp_converged_reason': None,
+    'ksp_rtol': 1.0e-12,
+    'ksp_monitor_true_residual': None,
     'pc_type':'fieldsplit',
     "pc_fieldsplit_type": "schur",
     "pc_fieldsplit_schur_fact_type": "full",
     "fieldsplit_0_ksp_type": "preonly",
     "fieldsplit_0_pc_type": "lu",
-    "fieldsplit_1_ksp_type": "preonly",
-    "fieldsplit_1_ksp_max_it": 1,
+    "fieldsplit_1_ksp_type": "gmres",
+    "fieldsplit_1_ksp_max_it": 20,
+    "fieldsplit_1_ksp_monitor": None,
     "fieldsplit_1_pc_type": "python",
     "fieldsplit_1_pc_python_type": "__main__.ALWaveSchurPC"
 }
@@ -122,10 +117,29 @@ zvec = as_vector((Constant(0.), Constant(0.)))
 bcs = [DirichletBC(W.sub(0), zvec, "on_boundary")]
 up_prob = LinearVariationalProblem(lhs(eqn), rhs(eqn), w1,bcs = bcs)
 up_solver = LinearVariationalSolver(up_prob,
-                                   nullspace=nullspace,
-                                   solver_parameters=schur_params)
+                                    nullspace=nullspace,
+                                    solver_parameters=schur_params)
 
 up_solver.solve()
 
+hparams = {
+    'mat_type': 'matfree',
+    'ksp_type': 'gmres',
+    'ksp_monitor': None,
+    'pc_type': 'python',
+    'pc_python_type': 'firedrake.HybridizationPC',
+    'hybridization': {'ksp_type': 'preonly',
+                      'pc_type': 'bjacobi',
+                      'sub_pc_type': 'ilu'
+                      }}
+
+w2 = Function(W)
+test_problem = LinearVariationalProblem(lhs(eqn0), rhs(eqn0), w2, bcs=bcs)
+test_solver = LinearVariationalSolver(test_problem,
+                                      nullspace=nullspace,
+                                      solver_parameters=schur_params)
+
 u1, p1 = w1.subfunctions
 File("alonestep.pvd").write(u1, p1)
+u2, p2 = w2.subfunctions
+print("norms u p", norm(u1-u2), norm(p1-p2))
