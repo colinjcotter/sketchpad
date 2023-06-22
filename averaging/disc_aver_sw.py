@@ -59,6 +59,9 @@ V1 = FunctionSpace(mesh, "BDM", 2)
 V2 = FunctionSpace(mesh, "DG", 1)
 W = MixedFunctionSpace((V1, V2))
 
+One = Function(V2).assign(1.0)
+Area = assemble(One*dx)
+
 u, eta = TrialFunctions(W)
 v, phi = TestFunctions(W)
 
@@ -428,8 +431,6 @@ name = args.filename
 file_sw = File(name+'.pvd')
 file_sw.write(un, etan, b)
 
-One = Function(V2).assign(1.0)
-Area = assemble(One*dx)
 mass0 = assemble(U_eta*dx)
 
 print ('tmax', tmax, 'dt', dt)
