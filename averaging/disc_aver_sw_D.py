@@ -6,7 +6,7 @@ print = PETSc.Sys.Print
 
 #get command arguments
 import argparse
-parser = argparse.ArgumentParser(description='Williamson 5 testcase for averaged propagator.')
+parser = argparse.ArgumentParser(description='Williamson 5 testcase for averaged propagator using D (thickness) as the pressure variable.')
 parser.add_argument('--ref_level', type=int, default=3, help='Refinement level of icosahedral grid. Default 3.')
 parser.add_argument('--tmax', type=float, default=360, help='Final time in hours. Default 24x15=360.')
 parser.add_argument('--dumpt', type=float, default=6, help='Dump time in hours. Default 6.')
@@ -62,7 +62,7 @@ W = MixedFunctionSpace((V1, V2))
 One = Function(V2).assign(1.0)
 Area = assemble(One*dx)
 
-u, eta = TrialFunctions(W)
+u, D = TrialFunctions(W)
 v, phi = TestFunctions(W)
 
 Omega = Constant(7.292e-5)  # rotation rate
@@ -74,8 +74,8 @@ c = sqrt(g*H)
 #Set up the forward and backwards scatter discrete exponential operator
 W0 = Function(W)
 W1 = Function(W)
-u0, eta0 = split(W0)
-u1, eta1 = split(W1)
+u0, D0 = split(W0)
+u1, D1 = split(W1)
 #D = eta + b
 
 v, phi = TestFunctions(W)
@@ -103,54 +103,54 @@ def advection(F, ubar, v, continuity=False, vector=False, upwind=True):
         L += un('-')*inner(v('+'), n('+')+n('-'))*inner(F('-'), n('-'))*dS
     return L
 
-u, eta = TrialFunctions(W)
+u, D = TrialFunctions(W)
 uh = (u0+u)/2
-etah = (eta0+eta)/2
+Dh = (D0+D)/2
 
 dt_ss = dt_s
 F1p = (
-    inner(v, u - u0) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*etah*div(v)
-    + phi*(eta - eta0) + dt_ss*H*div(uh)*phi
+    inner(v, u - u0) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*Dh*div(v)
+    + phi*(D - D0) + dt_ss*H*div(uh)*phi
 )*dx
 
 if args.advection:
     F1p += dt_ss*advection(uh, ubar, v, vector=True)
-    F1p += dt_ss*advection(etah, ubar, phi,
+    F1p += dt_ss*advection(Dh, ubar, phi,
                            continuity=True, vector=False)
 
 uh = (u+u1)/2
-etah = (eta+eta1)/2
+Dh = (D+D1)/2
 F0p = (
-    inner(v, u1 - u) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*etah*div(v)
-    + phi*(eta1 - eta) + dt_ss*H*div(uh)*phi
+    inner(v, u1 - u) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*Dh*div(v)
+    + phi*(D1 - D) + dt_ss*H*div(uh)*phi
 )*dx
 
 if args.advection:
     F0p += dt_ss*advection(uh, ubar, v, vector=True, upwind=False)
-    F0p += dt_ss*advection(etah, ubar, phi, vector=False,
+    F0p += dt_ss*advection(Dh, ubar, phi, vector=False,
                            continuity=True, upwind=False)
 
 dt_ss = -dt_s
 F1m = (
-    inner(v, u - u0) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*etah*div(v)
-    + phi*(eta - eta0) + dt_ss*H*div(uh)*phi
+    inner(v, u - u0) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*Dh*div(v)
+    + phi*(D - D0) + dt_ss*H*div(uh)*phi
 )*dx
 
 if args.advection:
     F1m += dt_ss*advection(uh, ubar, v, vector=True, upwind=False)
-    F1m += dt_ss*advection(etah, ubar, phi, vector=False,
+    F1m += dt_ss*advection(Dh, ubar, phi, vector=False,
                            continuity=True, upwind=False)
 
 uh = (u+u1)/2
-etah = (eta+eta1)/2
+Dh = (D+D1)/2
 F0m = (
-    inner(v, u1 - u) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*etah*div(v)
-    + phi*(eta1 - eta) + dt_ss*H*div(uh)*phi
+    inner(v, u1 - u) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*Dh*div(v)
+    + phi*(D1 - D) + dt_ss*H*div(uh)*phi
 )*dx
 
 if args.advection:
     F0m += dt_ss*advection(uh, ubar, v, vector=True)
-    F0m += dt_ss*advection(etah, ubar, phi, continuity=True, vector=False)
+    F0m += dt_ss*advection(Dh, ubar, phi, continuity=True, vector=False)
     
 hparams = {
     "snes_lag_jacobian": -2, 
@@ -244,27 +244,27 @@ K = 0.5*inner(u1, u1)
 uup = 0.5 * (dot(u1, n) + abs(dot(u1, n)))
 
 N = Function(W)
-nu, neta = TrialFunctions(W)
+nu, nD = TrialFunctions(W)
 
 vector_invariant = args.vector_invariant
-L = inner(nu, v)*dx + neta*phi*dx
+L = inner(nu, v)*dx + nD*phi*dx - div(v)*g*b*dx
 if vector_invariant:
     L -= (
         + inner(perp(grad(inner(v, perp(u1)))), u1)*dx
         - inner(both(perp(n)*inner(v, perp(u1))),
                 both(Upwind*u1))*dS
         + div(v)*K*dx
-        + inner(grad(phi), u1*(eta1-b))*dx
-        - jump(phi)*(uup('+')*(eta1('+')-b('+'))
-                     - uup('-')*(eta1('-') - b('-')))*dS
+        + inner(grad(phi), u1*D1)*dx
+        - jump(phi)*(uup('+')*D1('+')
+                     - uup('-')*D1('-'))*dS
     )
 else:
     L += advection(u1, u1, v, vector=True)
-    L += advection(eta1 - b, u1, phi, continuity=True, vector=False)
+    L += advection(D1, u1, phi, continuity=True, vector=False)
 
 if args.advection:
     L -= advection(u1, ubar, v, vector=True)
-    L -= advection(eta1, ubar, phi, continuity=True, vector=False)
+    L -= advection(D1, ubar, phi, continuity=True, vector=False)
 
 #with topography, D = H + eta - b
 
@@ -276,8 +276,8 @@ NSolver = LinearVariationalSolver(NProb,
 # Set up the backward gather
 X0 = Function(W)
 X1 = Function(W)
-u0, eta0 = split(X0)
-u1, eta1 = split(X1)
+u0, D0 = split(X0)
+u1, D1 = split(X1)
 
 # exph(L ds) = (1 - ds/2*L)^{-1}(1 + ds/2*L)
 # exph(-L ds) = (1 + ds/2*L)^{-1}(1 - ds/2*L)
@@ -291,23 +291,23 @@ u1, eta1 = split(X1)
 # we propagate W back, compute N, use to propagate X back
 
 w_k = Constant(1.0) # the weight
-u, eta = TrialFunctions(W)
+u, D = TrialFunctions(W)
 
-nu, neta = split(N)
+nu, nD = split(N)
 
 theta = Constant(0.5)
 uh = (1-theta)*u + theta*u1 + (1-theta)*w_k*nu
-etah = (1-theta)*eta + theta*eta1 + (1-theta)*w_k*neta
+Dh = (1-theta)*D + theta*D1 + (1-theta)*w_k*nD
 
 dt_ss = dt_s
 Fp = (
-    inner(v, u1 - u) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*etah*div(v)
-    + phi*(eta1 - eta) + dt_ss*H*div(uh)*phi
+    inner(v, u1 - u) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*Dh*div(v)
+    + phi*(D1 - D) + dt_ss*H*div(uh)*phi
 )*dx
-Fp += (inner(v, w_k*nu) + phi*w_k*neta)*dx
+Fp += (inner(v, w_k*nu) + phi*w_k*nD)*dx
 if args.advection:
     Fp += dt_ss*advection(uh, ubar, v, vector=True)
-    Fp += dt_ss*advection(etah, ubar, phi, continuity=True, vector=False)
+    Fp += dt_ss*advection(Dh, ubar, phi, continuity=True, vector=False)
 
 XProbp = LinearVariationalProblem(lhs(Fp), rhs(Fp), X0,
                                   constant_jacobian=True)
@@ -316,13 +316,13 @@ Xpsolver = LinearVariationalSolver(XProbp,
 
 dt_ss = -dt_s
 Fm = (
-    inner(v, u1 - u) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*etah*div(v)
-    + phi*(eta1 - eta) + dt_ss*H*div(uh)*phi
+    inner(v, u1 - u) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*Dh*div(v)
+    + phi*(D1 - D) + dt_ss*H*div(uh)*phi
 )*dx
-Fm += (inner(v, w_k*nu) + phi*w_k*neta)*dx
+Fm += (inner(v, w_k*nu) + phi*w_k*nD)*dx
 if args.advection:
     Fm += dt_ss*advection(uh, ubar, v, vector=True)
-    Fm += dt_ss*advection(etah, ubar, phi, continuity=True, vector=False)
+    Fm += dt_ss*advection(Dh, ubar, phi, continuity=True, vector=False)
 
 XProbm = LinearVariationalProblem(lhs(Fm), rhs(Fm), X0,
                                   constant_jacobian=True)
@@ -404,7 +404,6 @@ eta_expr = - ((R0 * Omega * u_max + u_max*u_max/2.0)*(x[2]*x[2]/(R0*R0)))/g
 un = Function(V1, name="Velocity").project(u_expr)
 if args.advection:
     ubar.project(u_expr)
-etan = Function(V2, name="Elevation").project(eta_expr)
 
 # Topography
 rl = pi/9.0
@@ -415,6 +414,7 @@ phi_c = pi/6.0
 minarg = min_value(pow(rl, 2), pow(phi_x - phi_c, 2) + pow(lambda_x - lambda_c, 2))
 bexpr = 2000.0*(1 - sqrt(minarg)/rl)
 b.interpolate(bexpr)
+Dn = Function(V2, name="Elevation").interpolate(eta_expr + H - b)
 
 U0 = Function(W)
 U1 = Function(W)
@@ -422,16 +422,19 @@ Ustar = Function(W)
 Average = Function(W)
 
 # set up initial conditions
-U_u, U_eta = U0.subfunctions
-U1_u, U1_eta = U1.subfunctions
+U_u, U_D = U0.subfunctions
+U1_u, U1_D = U1.subfunctions
 U_u.assign(un)
-U_eta.assign(etan)
+U_D.assign(Dn)
+
+etan = Function(V2)
 
 name = args.filename
 file_sw = File(name+'.pvd')
+etan.assign(Dn+b)
 file_sw.write(un, etan, b)
 
-mass0 = assemble(U_eta*dx)
+mass0 = assemble(U_D*dx)
 
 print ('tmax', tmax, 'dt', dt)
 while t < tmax + 0.5*dt:
@@ -487,10 +490,11 @@ while t < tmax + 0.5*dt:
     # start all over again
     U0.assign(U1)
     ubar.assign(un)
-    print("mass error", (mass0-assemble(U_eta*dx))/Area)
+    print("mass error", (mass0-assemble(U_D*dx))/Area)
     
     if tdump > dumpt - dt*0.5:
         un.assign(U_u)
-        etan.assign(U_eta)
+        Dn.assign(U_D)
+        etan.assign(Dn+b)
         file_sw.write(un, etan, b)
         tdump -= dumpt
