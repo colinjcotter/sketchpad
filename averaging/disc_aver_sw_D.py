@@ -156,6 +156,7 @@ if args.advection:
     F0m += dt_ss*advection(Dh, ubar, phi, continuity=True, vector=False)
     
 hparams = {
+    "snes_view": None,
     "snes_lag_preconditioner": 10,
     "snes_lag_preconditioner_persists": None,
     'mat_type': 'matfree',
@@ -362,29 +363,33 @@ def average(V, dVdt, positive=True, t=None):
     # forward scatter
     dt_s.assign(dts)
     for step in ProgressBar(f'average forward').iter(range(ns)):
-        if positive:
-            forwardp_expsolver.solve()
-        else:
-            forwardm_expsolver.solve()
+        with PETSc.Log.Event("forward propagation ds"):
+            if positive:
+                forwardp_expsolver.solve()
+            else:
+                forwardm_expsolver.solve()
         W0.assign(W1)
     # backwards gather
     X1.assign(0.)
     for step in ProgressBar(f'average backward').iter(range(ns, -1, -1)):
         # compute N
-        NSolver.solve()
+        with PETSc.Log.Event("nonlinearity"):
+            NSolver.solve()
         # propagate X back
-        if positive:
-            Xpsolver.solve()
-        else:
-            Xmsolver.solve()
+        with PETSc.Log.Event("backward integration"):
+            if positive:
+                Xpsolver.solve()
+            else:
+                Xmsolver.solve()
         X1.assign(X0)
         # back propagate W
         if step > 0:
             w_k.assign(weights[step])
-            if positive:
-                backwardp_expsolver.solve()
-            else:
-                backwardm_expsolver.solve()
+            with PETSc.Log.Event("backward propagation ds"):
+                if positive:
+                    backwardp_expsolver.solve()
+                else:
+                    backwardm_expsolver.solve()
             W1.assign(W0)
     # copy contents
     dVdt.assign(X0)
@@ -395,13 +400,15 @@ def propagate(V_in, V_out, t=None):
     # forward scatter
     dt_s.assign(dt/nt)
     for step in ProgressBar(f'propagate').iter(range(nt)):
-        forwardp_expsolver.solve()
-        W0.assign(W1)
+        with PETSc.Log.Event("forward propagation dt"):
+            forwardp_expsolver.solve()
+            W0.assign(W1)
     # copy contents
     V_out.assign(W1)
 
 t = 0.
-tmax = 60.*60.*args.tmax
+#tmax = 60.*60.*args.tmax
+tmax = dt
 dumpt = args.dumpt*60.*60.
 tdump = 0.
 
