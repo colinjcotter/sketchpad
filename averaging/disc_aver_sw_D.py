@@ -46,7 +46,7 @@ R0 = 6371220.
 H = Constant(5960.)
 
 mesh = IcosahedralSphereMesh(radius=R0,
-                             refinement_level=ref_level, degree=1)
+                             refinement_level=ref_level, degree=3)
 cx = SpatialCoordinate(mesh)
 mesh.init_cell_orientations(cx)
 
@@ -82,6 +82,9 @@ v, phi = TestFunctions(W)
 
 if args.advection:
     ubar = Function(V1)
+    constant_jacobian = False
+else:
+    constant_jacobian = True
 
 def advection(F, ubar, v, continuity=False, vector=False, upwind=True):
     """
@@ -153,7 +156,8 @@ if args.advection:
     F0m += dt_ss*advection(Dh, ubar, phi, continuity=True, vector=False)
     
 hparams = {
-    "snes_lag_jacobian": -2, 
+    "snes_lag_preconditioner": 10,
+    "snes_lag_preconditioner_persists": None,
     'mat_type': 'matfree',
     'ksp_type': 'gmres',
     #'ksp_monitor': None,
@@ -161,7 +165,8 @@ hparams = {
     'pc_python_type': 'firedrake.HybridizationPC',
     'hybridization': {'ksp_type': 'preonly',
                       'pc_type': 'bjacobi',
-                      'sub_pc_type': 'ilu'
+                      'sub_pc_type': 'ilu',
+                      #'sub_pc_factor_mat_solver_type': 'mumps'
                       }}
 mparams = {
     #'ksp_monitor': None,
@@ -177,7 +182,8 @@ mparams = {
 
 monoparameters = {
     #"snes_monitor": None,
-    "snes_lag_jacobian": -2, 
+    "snes_lag_preconditioner": 10,
+    "snes_lag_preconditioner_persists": None,
     "mat_type": "matfree",
     "ksp_type": "fgmres",
     #'ksp_monitor': None,
@@ -212,26 +218,26 @@ monoparameters = {
 }
 
 
-params = monoparameters
-#params = hparams
+#params = monoparameters
+params = hparams
 
 # Set up the forward scatter
 forwardp_expProb = LinearVariationalProblem(lhs(F1p), rhs(F1p), W1,
-                                            constant_jacobian=True)
+                                            constant_jacobian=constant_jacobian)
 forwardp_expsolver = LinearVariationalSolver(forwardp_expProb,
                                                solver_parameters=params)
 forwardm_expProb = LinearVariationalProblem(lhs(F1m), rhs(F1m), W1,
-                                            constant_jacobian=True)
+                                            constant_jacobian=constant_jacobian)
 forwardm_expsolver = LinearVariationalSolver(forwardm_expProb,
                                                solver_parameters=params)
 
 # Set up the backward scatter
 backwardp_expProb = LinearVariationalProblem(lhs(F0p), rhs(F0p), W0,
-                                             constant_jacobian=True)
+                                             constant_jacobian=constant_jacobian)
 backwardp_expsolver = LinearVariationalSolver(backwardp_expProb,
                                                 solver_parameters=params)
 backwardm_expProb = LinearVariationalProblem(lhs(F0m), rhs(F0m), W0,
-                                             constant_jacobian=True)
+                                             constant_jacobian=constant_jacobian)
 backwardm_expsolver = LinearVariationalSolver(backwardm_expProb,
                                                 solver_parameters=params)
 
@@ -247,6 +253,8 @@ N = Function(W)
 nu, nD = TrialFunctions(W)
 
 vector_invariant = args.vector_invariant
+# Sign confusions! We are solving for nu, nD, but
+# equation is written in the form (nu, nD) - N(u1, D1) = 0.
 L = inner(nu, v)*dx + nD*phi*dx - div(v)*g*b*dx
 if vector_invariant:
     L -= (
@@ -306,11 +314,13 @@ Fp = (
 )*dx
 Fp += (inner(v, w_k*nu) + phi*w_k*nD)*dx
 if args.advection:
-    Fp += dt_ss*advection(uh, ubar, v, vector=True)
-    Fp += dt_ss*advection(Dh, ubar, phi, continuity=True, vector=False)
+    # we are going backwards in time
+    Fp += dt_ss*advection(uh, ubar, v, upwind=False, vector=True)
+    Fp += dt_ss*advection(Dh, ubar, phi, continuity=True,
+                          upwind=False, vector=False)
 
 XProbp = LinearVariationalProblem(lhs(Fp), rhs(Fp), X0,
-                                  constant_jacobian=True)
+                                  constant_jacobian=constant_jacobian)
 Xpsolver = LinearVariationalSolver(XProbp,
                                   solver_parameters = params)
 
@@ -325,7 +335,7 @@ if args.advection:
     Fm += dt_ss*advection(Dh, ubar, phi, continuity=True, vector=False)
 
 XProbm = LinearVariationalProblem(lhs(Fm), rhs(Fm), X0,
-                                  constant_jacobian=True)
+                                  constant_jacobian=constant_jacobian)
 Xmsolver = LinearVariationalSolver(XProbm,
                                   solver_parameters = params)
 
