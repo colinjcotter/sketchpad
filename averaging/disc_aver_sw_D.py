@@ -171,8 +171,8 @@ hparams = {
     'pc_python_type': 'firedrake.HybridizationPC',
     'hybridization': {'ksp_type': 'preonly',
                       'pc_type': 'bjacobi',
-                      'sub_pc_type': 'ilu',
-                      #'sub_pc_factor_mat_solver_type': 'mumps'
+                      'sub_pc_type': 'lu',
+                      'sub_pc_factor_mat_solver_type': 'mumps'
                       }}
 mparams = {
     #'ksp_monitor': None,
@@ -242,8 +242,10 @@ monoparameters_nt = {
 
 
 
-params = monoparameters_ns
-#params = hparams
+if args.advection:
+    params = monoparameters_ns
+else:
+    params = hparams
 
 # Set up the forward scatter
 forwardp_expProb = LinearVariationalProblem(lhs(F1p), rhs(F1p), W1,
@@ -256,7 +258,11 @@ forwardm_expsolver = LinearVariationalSolver(forwardm_expProb,
                                                solver_parameters=params)
 
 # Set up the forward solver for dt propagation
-params = monoparameters_nt
+if args.advection:
+    params = monoparameters_nt
+else:
+    params = hparams
+
 forwardp_expProb_dt = LinearVariationalProblem(lhs(F1p), rhs(F1p), W1,
                                             constant_jacobian=constant_jacobian)
 forwardp_expsolver_dt = LinearVariationalSolver(forwardp_expProb_dt,
@@ -264,7 +270,11 @@ forwardp_expsolver_dt = LinearVariationalSolver(forwardp_expProb_dt,
 
 
 # Set up the backward scatter
-params = monoparameters_ns
+if args.advection:
+    params = monoparameters_ns
+else:
+    params = hparams
+
 backwardp_expProb = LinearVariationalProblem(lhs(F0p), rhs(F0p), W0,
                                              constant_jacobian=constant_jacobian)
 backwardp_expsolver = LinearVariationalSolver(backwardp_expProb,
