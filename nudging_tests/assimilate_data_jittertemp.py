@@ -19,7 +19,7 @@ verbose = True
 jtfilter = jittertemp_filter(n_temp=4, n_jitt = 4, rho= 0.99,
                              verbose=verbose, MALA=MALA)
 
-nensemble = [5,5,5,5]
+nensemble = [15,15,15,15]
 jtfilter.setup(nensemble, model)
 
 x, = SpatialCoordinate(model.mesh) 
