@@ -1,5 +1,6 @@
 from firedrake import *
 import numpy as np
+import mg
 
 from firedrake.petsc import PETSc
 print = PETSc.Sys.Print
@@ -111,6 +112,7 @@ uh = (u0+u)/2
 Dh = (D0+D)/2
 
 dt_ss = dt_s
+# positive s outward propagation
 F1p = (
     inner(v, u - u0) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*Dh*div(v)
     + phi*(D - D0) + dt_ss*H*div(uh)*phi
@@ -123,6 +125,7 @@ if args.advection:
 
 uh = (u+u1)/2
 Dh = (D+D1)/2
+# positive s inward propagation
 F0p = (
     inner(v, u1 - u) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*Dh*div(v)
     + phi*(D1 - D) + dt_ss*H*div(uh)*phi
@@ -134,6 +137,7 @@ if args.advection:
                            continuity=True, upwind=False)
 
 dt_ss = -dt_s
+# negative s outward  propagation
 F1m = (
     inner(v, u - u0) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*Dh*div(v)
     + phi*(D - D0) + dt_ss*H*div(uh)*phi
@@ -146,6 +150,7 @@ if args.advection:
 
 uh = (u+u1)/2
 Dh = (D+D1)/2
+# negative s inward propagation
 F0m = (
     inner(v, u1 - u) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*Dh*div(v)
     + phi*(D1 - D) + dt_ss*H*div(uh)*phi
@@ -154,9 +159,9 @@ F0m = (
 if args.advection:
     F0m += dt_ss*advection(uh, ubar, v, vector=True)
     F0m += dt_ss*advection(Dh, ubar, phi, continuity=True, vector=False)
-    
+
 hparams = {
-    "snes_view": None,
+    #"snes_view": None,
     "snes_lag_preconditioner": 10,
     "snes_lag_preconditioner_persists": None,
     'mat_type': 'matfree',
@@ -181,46 +186,64 @@ mparams = {
     'fieldsplit_1_sub_pc_type':'ilu'
 }
 
-monoparameters = {
+monoparameters_ns = {
     #"snes_monitor": None,
-    "snes_lag_preconditioner": 10,
+    "snes_lag_preconditioner": ns,
     "snes_lag_preconditioner_persists": None,
     "mat_type": "matfree",
-    "ksp_type": "fgmres",
+    "ksp_type": "gmres",
     #'ksp_monitor': None,
     #"ksp_monitor_true_residual": None,
     #"ksp_converged_reason": None,
     "ksp_atol": 1e-8,
     "ksp_rtol": 1e-8,
-    "ksp_max_it": 400,
-    "pc_type": "mg",
-    "pc_mg_cycle_type": "v",
-    "pc_mg_type": "multiplicative",
-    "mg_levels_ksp_type": "gmres",
-    "mg_levels_ksp_max_it": 2,
-    #"mg_levels_ksp_convergence_test": "skip",
-    "mg_levels_pc_type": "python",
-    "mg_levels_pc_python_type": "firedrake.PatchPC",
-    "mg_levels_patch_pc_patch_save_operators": True,
-    "mg_levels_patch_pc_patch_partition_of_unity": True,
-    "mg_levels_patch_pc_patch_sub_mat_type": "seqdense",
-    "mg_levels_patch_pc_patch_construct_dim": 0,
-    "mg_levels_patch_pc_patch_construct_type": "star",
-    "mg_levels_patch_pc_patch_local_type": "additive",
-    "mg_levels_patch_pc_patch_precompute_element_tensors": True,
-    "mg_levels_patch_pc_patch_symmetrise_sweep": False,
-    "mg_levels_patch_sub_ksp_type": "preonly",
-    "mg_levels_patch_sub_pc_type": "lu",
-    "mg_levels_patch_sub_pc_factor_shift_type": "nonzero",
-    "mg_coarse_pc_type": "python",
-    "mg_coarse_pc_python_type": "firedrake.AssembledPC",
-    "mg_coarse_assembled_pc_type": "lu",
-    "mg_coarse_assembled_pc_factor_mat_solver_type": "mumps",
+    "ksp_max_it": 40,
+    "pc_type": "python",
+    "pc_python_type": "firedrake.PatchPC",
+    "patch_pc_patch_save_operators": True,
+    "patch_pc_patch_partition_of_unity": True,
+    "patch_pc_patch_sub_mat_type": "seqdense",
+    "patch_pc_patch_construct_dim": 0,
+    "patch_pc_patch_construct_type": "star",
+    "patch_pc_patch_local_type": "additive",
+    "patch_pc_patch_precompute_element_tensors": True,
+    "patch_pc_patch_symmetrise_sweep": False,
+    "patch_sub_ksp_type": "preonly",
+    "patch_sub_pc_type": "lu",
+    "patch_sub_pc_factor_shift_type": "nonzero",
+}
+
+monoparameters_nt = {
+    #"snes_monitor": None,
+    "snes_lag_preconditioner": nt,
+    "snes_lag_preconditioner_persists": None,
+    "mat_type": "matfree",
+    "ksp_type": "gmres",
+    #'ksp_monitor': None,
+    #"ksp_monitor_true_residual": None,
+    #"ksp_converged_reason": None,
+    "ksp_atol": 1e-8,
+    "ksp_rtol": 1e-8,
+    "ksp_max_it": 40,
+    "pc_type": "python",
+    "pc_python_type": "firedrake.PatchPC",
+    "patch_pc_patch_save_operators": True,
+    "patch_pc_patch_partition_of_unity": True,
+    "patch_pc_patch_sub_mat_type": "seqdense",
+    "patch_pc_patch_construct_dim": 0,
+    "patch_pc_patch_construct_type": "star",
+    "patch_pc_patch_local_type": "additive",
+    "patch_pc_patch_precompute_element_tensors": True,
+    "patch_pc_patch_symmetrise_sweep": False,
+    "patch_sub_ksp_type": "preonly",
+    "patch_sub_pc_type": "lu",
+    "patch_sub_pc_factor_shift_type": "nonzero",
 }
 
 
-#params = monoparameters
-params = hparams
+
+params = monoparameters_ns
+#params = hparams
 
 # Set up the forward scatter
 forwardp_expProb = LinearVariationalProblem(lhs(F1p), rhs(F1p), W1,
@@ -232,7 +255,16 @@ forwardm_expProb = LinearVariationalProblem(lhs(F1m), rhs(F1m), W1,
 forwardm_expsolver = LinearVariationalSolver(forwardm_expProb,
                                                solver_parameters=params)
 
+# Set up the forward solver for dt propagation
+params = monoparameters_nt
+forwardp_expProb_dt = LinearVariationalProblem(lhs(F1p), rhs(F1p), W1,
+                                            constant_jacobian=constant_jacobian)
+forwardp_expsolver_dt = LinearVariationalSolver(forwardp_expProb_dt,
+                                                solver_parameters=params)
+
+
 # Set up the backward scatter
+params = monoparameters_ns
 backwardp_expProb = LinearVariationalProblem(lhs(F0p), rhs(F0p), W0,
                                              constant_jacobian=constant_jacobian)
 backwardp_expsolver = LinearVariationalSolver(backwardp_expProb,
@@ -309,6 +341,7 @@ uh = (1-theta)*u + theta*u1 + (1-theta)*w_k*nu
 Dh = (1-theta)*D + theta*D1 + (1-theta)*w_k*nD
 
 dt_ss = dt_s
+# positive s inward propagation
 Fp = (
     inner(v, u1 - u) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*Dh*div(v)
     + phi*(D1 - D) + dt_ss*H*div(uh)*phi
@@ -326,6 +359,7 @@ Xpsolver = LinearVariationalSolver(XProbp,
                                   solver_parameters = params)
 
 dt_ss = -dt_s
+# negative s inward propagation
 Fm = (
     inner(v, u1 - u) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*Dh*div(v)
     + phi*(D1 - D) + dt_ss*H*div(uh)*phi
@@ -401,14 +435,14 @@ def propagate(V_in, V_out, t=None):
     dt_s.assign(dt/nt)
     for step in ProgressBar(f'propagate').iter(range(nt)):
         with PETSc.Log.Event("forward propagation dt"):
-            forwardp_expsolver.solve()
+            forwardp_expsolver_dt.solve()
             W0.assign(W1)
     # copy contents
     V_out.assign(W1)
 
 t = 0.
-#tmax = 60.*60.*args.tmax
-tmax = dt
+tmax = 60.*60.*args.tmax
+#tmax = dt
 dumpt = args.dumpt*60.*60.
 tdump = 0.
 
@@ -454,7 +488,7 @@ file_sw.write(un, etan, b)
 mass0 = assemble(U_D*dx)
 
 print ('tmax', tmax, 'dt', dt)
-while t < tmax + 0.5*dt:
+while t < tmax - 0.5*dt:
     print(t)
     t += dt
     tdump += dt
@@ -506,7 +540,7 @@ while t < tmax + 0.5*dt:
     U1 += dt*Average/2
     # start all over again
     U0.assign(U1)
-    ubar.assign(un)
+    #ubar.assign(un)
     print("mass error", (mass0-assemble(U_D*dx))/Area)
     
     if tdump > dumpt - dt*0.5:
