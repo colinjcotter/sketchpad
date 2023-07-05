@@ -21,9 +21,13 @@ parser.add_argument('--advection', action="store_true", help='include mean flow 
 parser.add_argument('--dynamic_ubar', action="store_true", help='Use un as ubar.')
 parser.add_argument('--vector_invariant', action="store_true", help='use vector invariant form.')
 parser.add_argument('--eta', action="store_true", help='use eta instead of D.')
+parser.add_argument('--show_args', action='store_true', help='Output all the arguments.')
 
 args = parser.parse_known_args()
 args = args[0]
+
+if args.show_args:
+    PETSc.Sys.Print(args)
 
 ref_level = args.ref_level
 hours = args.dt
@@ -171,17 +175,17 @@ if args.advection:
 
 hparams = {
     #"snes_view": None,
-    "snes_lag_preconditioner": 10,
-    "snes_lag_preconditioner_persists": None,
+    #"snes_lag_preconditioner": 10,
+    #"snes_lag_preconditioner_persists": None,
     'mat_type': 'matfree',
     'ksp_type': 'gmres',
     #'ksp_monitor': None,
+    'ksp_converged_reason': None,
     'pc_type': 'python',
     'pc_python_type': 'firedrake.HybridizationPC',
     'hybridization': {'ksp_type': 'preonly',
-                      'pc_type': 'bjacobi',
-                      'sub_pc_type': 'lu',
-                      'sub_pc_factor_mat_solver_type': 'mumps'
+                      'pc_type': 'lu',
+                      'pc_factor_mat_solver_type': 'mumps'
                       }}
 mparams = {
     #'ksp_monitor': None,
@@ -272,11 +276,26 @@ if args.advection:
 else:
     params = hparams
 
+u, D = TrialFunctions(W)
+uh = (u0+u)/2
+Dh = (D0+D)/2
+
+dt_ss = Constant(dt/nt)
+# positive s outward propagation
+F1p = (
+    inner(v, u - u0) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*Dh*div(v)
+    + phi*(D - D0) + dt_ss*H*div(uh)*phi
+)*dx
+
+if args.advection:
+    F1p += dt_ss*advection(uh, ubar, v, vector=True)
+    F1p += dt_ss*advection(Dh, ubar, phi,
+                           continuity=True, vector=False)
+    
 forwardp_expProb_dt = LinearVariationalProblem(lhs(F1p), rhs(F1p), W1,
                                             constant_jacobian=constant_jacobian)
 forwardp_expsolver_dt = LinearVariationalSolver(forwardp_expProb_dt,
                                                 solver_parameters=params)
-
 
 # Set up the backward scatter
 if args.advection:
@@ -469,7 +488,6 @@ def average(V, dVdt, positive=True, t=None):
 def propagate(V_in, V_out, t=None):
     W0.assign(V_in)
     # forward scatter
-    dt_s.assign(dt/nt)
     for step in ProgressBar(f'propagate').iter(range(nt)):
         with PETSc.Log.Event("forward propagation dt"):
             forwardp_expsolver_dt.solve()
