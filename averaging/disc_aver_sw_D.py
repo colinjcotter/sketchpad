@@ -18,6 +18,7 @@ parser.add_argument('--alpha', type=float, default=1, help='Averaging window wid
 parser.add_argument('--filename', type=str, default='w2', help='filename for pvd')
 parser.add_argument('--check', action="store_true", help='print out some information about frequency resolution and exit')
 parser.add_argument('--advection', action="store_true", help='include mean flow advection in L.')
+parser.add_argument('--dynamic_ubar', action="store_true", help='Use un as ubar.')
 parser.add_argument('--vector_invariant', action="store_true", help='use vector invariant form.')
 
 args = parser.parse_known_args()
@@ -83,9 +84,11 @@ v, phi = TestFunctions(W)
 
 if args.advection:
     ubar = Function(V1)
-    constant_jacobian = False
-else:
+
+if args.dynamic_ubar:
     constant_jacobian = True
+else:
+    constant_jacobian = False
 
 def advection(F, ubar, v, continuity=False, vector=False, upwind=True):
     """
@@ -464,7 +467,7 @@ u_expr = as_vector([-u_max*x[1]/R0, u_max*x[0]/R0, 0.0])
 eta_expr = - ((R0 * Omega * u_max + u_max*u_max/2.0)*(x[2]*x[2]/(R0*R0)))/g
 un = Function(V1, name="Velocity").project(u_expr)
 if args.advection:
-    ubar.project(u_expr)
+    ubar.assign(un)
 
 # Topography
 rl = pi/9.0
@@ -550,7 +553,8 @@ while t < tmax - 0.5*dt:
     U1 += dt*Average/2
     # start all over again
     U0.assign(U1)
-    #ubar.assign(un)
+    if dynamic_ubar:
+        ubar.assign(un)
     print("mass error", (mass0-assemble(U_D*dx))/Area)
     
     if tdump > dumpt - dt*0.5:
