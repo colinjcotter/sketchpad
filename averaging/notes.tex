@@ -1,0 +1,48 @@
+\documentclass{article}
+\usepackage{amsmath,amssymb,stmaryrd}
+\def\MM#1{\boldsymbol{#1}}
+\newcommand{\pp}[2]{\frac{\partial #1}{\partial #2}} 
+\newcommand{\dede}[2]{\frac{\delta #1}{\delta #2}}
+\newcommand{\dd}[2]{\frac{\diff#1}{\diff#2}}
+\newcommand{\dt}[1]{\diff\!#1}
+\DeclareMathOperator{\Hess}{Hess}
+\def\MM#1{\boldsymbol{#1}}
+\DeclareMathOperator{\diff}{d}
+\DeclareMathOperator{\DIV}{DIV}
+\DeclareMathOperator{\D}{D}
+\bibliographystyle{plain}
+\newcommand{\vecx}[1]{\MM{#1}}
+\newtheorem{definition}{Definition}
+\newcommand{\code}[1]{{\ttfamily #1}} 
+%uncomment \solnsfalse to remove solution set
+\newif\ifsolns
+%\solnstrue
+\solnsfalse
+
+\usepackage{fancybox}
+\begin{document}
+\title{Equation notes}
+\author{all of us}
+\maketitle
+
+\begin{align}
+  u_t + u\cdot\nabla u + fu^{\perp} + g\nabla (D-H_0+b) = 0, \\
+  D_t + \nabla\cdot (uD) = 0.
+\end{align}
+$\eta$ version.
+
+\begin{align}
+  u_t + u\cdot\nabla u + fu^{\perp} + g\nabla \eta = 0, \\
+  \eta_t + \nabla\cdot (u(H_0-b+\eta)) = 0.
+\end{align}
+
+Splitting (without advection)
+
+\begin{align}
+  u_t &= \underbrace{- fu^{\perp} - g\nabla \eta}_{L_u} -u\cdot\nabla u, \\
+  \eta_t &=\underbrace{- \nabla\cdot (u(H_0-b))}_{L_\eta} -\nabla\cdot (u\eta).
+\end{align}
+
+
+\end{document}
+

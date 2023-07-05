@@ -79,7 +79,7 @@ b = Function(V2, name="Topography")
 c = sqrt(g*H0)
 
 if args.eta:
-    H = H0 + b
+    H = H0 - b
 else:
     H = H0
 
