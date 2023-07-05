@@ -20,6 +20,7 @@ parser.add_argument('--check', action="store_true", help='print out some informa
 parser.add_argument('--advection', action="store_true", help='include mean flow advection in L.')
 parser.add_argument('--dynamic_ubar', action="store_true", help='Use un as ubar.')
 parser.add_argument('--vector_invariant', action="store_true", help='use vector invariant form.')
+parser.add_argument('--eta', action="store_true", help='use eta instead of D.')
 
 args = parser.parse_known_args()
 args = args[0]
@@ -45,7 +46,7 @@ if args.check:
 
 #some domain, parameters and FS setup
 R0 = 6371220.
-H = Constant(5960.)
+H0 = Constant(5960.)
 
 mesh = IcosahedralSphereMesh(radius=R0,
                              refinement_level=ref_level, degree=3)
@@ -72,6 +73,11 @@ f = 2*Omega*cz/Constant(R0)  # Coriolis parameter
 g = Constant(9.8)  # Gravitational constant
 b = Function(V2, name="Topography")
 c = sqrt(g*H)
+
+if args.eta:
+    H = H0 + b
+else:
+    H = H0
 
 #Set up the forward and backwards scatter discrete exponential operator
 W0 = Function(W)
@@ -301,7 +307,10 @@ nu, nD = TrialFunctions(W)
 vector_invariant = args.vector_invariant
 # Sign confusions! We are solving for nu, nD, but
 # equation is written in the form (nu, nD) - N(u1, D1) = 0.
-L = inner(nu, v)*dx + nD*phi*dx - div(v)*g*b*dx
+L = inner(nu, v)*dx + nD*phi*dx
+if not args.eta:
+    L -= div(v)*g*b*dx
+
 if vector_invariant:
     L -= (
         + inner(perp(grad(inner(v, perp(u1)))), u1)*dx
@@ -314,11 +323,26 @@ if vector_invariant:
     )
 else:
     L += advection(u1, u1, v, vector=True)
-    L += advection(D1, u1, phi, continuity=True, vector=False)
+    if args.eta:
+        L += advection(D1, u1, phi, continuity=True, vector=False)
+    else:
+        L += advection(D1-H, u1, phi, continuity=True, vector=False)
+
+# for args.eta True we have eta_t + div(u(eta+H)) = eta_t + div(uH) + div(u*eta) [linear and nonlinear]
+# otherwise we have D_t + div(uD) = D_t + div(uH) + div(u(D-H))
+# noting that H = H0 - b when args.eta True and H = H0 otherwise
+
+# combining with args.advection True
+# for args.eta True we have eta_t + [div(uH) - div(ubar*eta)] + div((u-ubar)*eta) [linear in square brackets]
+# otherwise we have D_t + [div(uH) - div(ubar*D)] + div((u-ubar)D - uH) [linear in square brackets]
+# last term disappears when div ubar = 0.
 
 if args.advection:
     L -= advection(u1, ubar, v, vector=True)
-    L -= advection(D1, ubar, phi, continuity=True, vector=False)
+    if args.eta:
+        L -= advection(D1, ubar, phi, continuity=True, vector=False)
+    else:
+        L -= advection(D1, ubar, phi, continuity=True, vector=False)
 
 #with topography, D = H + eta - b
 
@@ -467,7 +491,22 @@ u_expr = as_vector([-u_max*x[1]/R0, u_max*x[0]/R0, 0.0])
 eta_expr = - ((R0 * Omega * u_max + u_max*u_max/2.0)*(x[2]*x[2]/(R0*R0)))/g
 un = Function(V1, name="Velocity").project(u_expr)
 if args.advection:
-    ubar.assign(un)
+    # projection solve removes divergent parts
+    u, p = TrialFunctions(W)
+    w, q = TestFunctions(W)
+    eqn = (
+        inner(w, u) - div(w)*p
+        + q*div(u+un)
+        )*dx
+    Uproj = Function(W)
+    projection_problem = LinearVariationalProblem(lhs(eqn), rhs(eqn), Uproj)
+    v_basis = VectorSpaceBasis(constant=True, comm=COMM_WORLD)
+    nullspace = MixedVectorSpaceBasis(W, [W.sub(0), v_basis])
+    projection_solver = LinearVariationalSolver(projection_problem, nullspace=nullspace,
+                                                solver_parameters = params)
+    projection_solver.solve()
+    u, _ = Uproj.subfunctions
+    ubar.assign(un + u)
 
 # Topography
 rl = pi/9.0
@@ -478,7 +517,10 @@ phi_c = pi/6.0
 minarg = min_value(pow(rl, 2), pow(phi_x - phi_c, 2) + pow(lambda_x - lambda_c, 2))
 bexpr = 2000.0*(1 - sqrt(minarg)/rl)
 b.interpolate(bexpr)
-Dn = Function(V2, name="Elevation").interpolate(eta_expr + H - b)
+if args.eta:
+    Dn = Function(V2, name="Elevation").interpolate(eta_expr)
+else:
+    Dn = Function(V2, name="Depth").interpolate(eta_expr + H - b)
 
 U0 = Function(W)
 U1 = Function(W)
@@ -491,11 +533,14 @@ U1_u, U1_D = U1.subfunctions
 U_u.assign(un)
 U_D.assign(Dn)
 
-etan = Function(V2)
+etan = Function(V2, name="Elevation")
 
 name = args.filename
 file_sw = File(name+'.pvd')
-etan.assign(Dn+b)
+if args.eta:
+    etan.assign(Dn)
+else:
+    etan.assign(Dn-H0+b)
 file_sw.write(un, etan, b)
 
 mass0 = assemble(U_D*dx)
@@ -538,6 +583,7 @@ while t < tmax - 0.5*dt:
 
     # steps are then
     # Compute B^n = exp(dt L)U^n
+    print("RK stage 1")
     propagate(U0, U1, t=t)
     U1 /= 2
     # Compute U^* = exp(dt L)[ U^n + dt*<exp(-sL)N(exp(sL)U^n)>_s]
@@ -547,6 +593,7 @@ while t < tmax - 0.5*dt:
     Ustar += dt*Average
     propagate(Ustar, Ustar, t=t)
     # compute U^{n+1} = (B^n + U^*)/2 + dt*<exp(-sL)N(exp(sL)U^*)>/2
+    print("RK stage 2")
     average(Ustar, Average, positive=True, t=t)
     U1 += Ustar/2 + dt*Average/2
     average(Ustar, Average, positive=False, t=t)
@@ -554,12 +601,17 @@ while t < tmax - 0.5*dt:
     # start all over again
     U0.assign(U1)
     if args.dynamic_ubar:
-        ubar.assign(un)
+        projection_solver.solve()
+        u, _ = Uproj.subfunctions
+        ubar.assign(un + u)
     print("mass error", (mass0-assemble(U_D*dx))/Area)
     
     if tdump > dumpt - dt*0.5:
         un.assign(U_u)
         Dn.assign(U_D)
-        etan.assign(Dn+b)
+        if args.eta:
+            etan.assign(Dn)
+        else:
+            etan.assign(Dn-H0+b)
         file_sw.write(un, etan, b)
         tdump -= dumpt
