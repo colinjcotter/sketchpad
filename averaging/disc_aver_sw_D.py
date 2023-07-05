@@ -72,7 +72,7 @@ Omega = Constant(7.292e-5)  # rotation rate
 f = 2*Omega*cz/Constant(R0)  # Coriolis parameter
 g = Constant(9.8)  # Gravitational constant
 b = Function(V2, name="Topography")
-c = sqrt(g*H)
+c = sqrt(g*H0)
 
 if args.eta:
     H = H0 + b
@@ -333,8 +333,8 @@ else:
 # noting that H = H0 - b when args.eta True and H = H0 otherwise
 
 # combining with args.advection True
-# for args.eta True we have eta_t + [div(uH) - div(ubar*eta)] + div((u-ubar)*eta) [linear in square brackets]
-# otherwise we have D_t + [div(uH) - div(ubar*D)] + div((u-ubar)D - uH) [linear in square brackets]
+# for args.eta True we have eta_t + [div(uH) + div(ubar*eta)] + div(u*eta - ubar*eta) [linear in square brackets]
+# otherwise we have D_t + [div(uH) + div(ubar*D)] + div((u(D-H) - ubar*D) [linear in square brackets]
 # last term disappears when div ubar = 0.
 
 if args.advection:
@@ -503,7 +503,7 @@ if args.advection:
     v_basis = VectorSpaceBasis(constant=True, comm=COMM_WORLD)
     nullspace = MixedVectorSpaceBasis(W, [W.sub(0), v_basis])
     projection_solver = LinearVariationalSolver(projection_problem, nullspace=nullspace,
-                                                solver_parameters = params)
+                                                solver_parameters = hparams)
     projection_solver.solve()
     u, _ = Uproj.subfunctions
     ubar.assign(un + u)

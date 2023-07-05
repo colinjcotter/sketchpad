@@ -69,7 +69,7 @@ Omega = Constant(7.292e-5)  # rotation rate
 f = 2*Omega*cz/Constant(R0)  # Coriolis parameter
 g = Constant(9.8)  # Gravitational constant
 b = Function(V2, name="Topography")
-c = sqrt(g*H)
+c = sqrt(g*H0)
 
 #Set up the forward and backwards scatter discrete exponential operator
 W0 = Function(W)
