@@ -22,6 +22,7 @@ parser.add_argument('--dynamic_ubar', action="store_true", help='Use un as ubar.
 parser.add_argument('--vector_invariant', action="store_true", help='use vector invariant form.')
 parser.add_argument('--eta', action="store_true", help='use eta instead of D.')
 parser.add_argument('--show_args', action='store_true', help='Output all the arguments.')
+parser.add_argument('--mass_check', action='store_true', help='Check mass conservation in the solver.')
 
 args = parser.parse_known_args()
 args = args[0]
@@ -141,7 +142,7 @@ Dh = (D+D1)/2
 # positive s inward propagation
 F0p = (
     inner(v, u1 - u) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*Dh*div(v)
-    + phi*(D1 - D) + dt_ss*H*div(uh)*phi
+    + phi*(D1 - D) + dt_ss*div(uh*H)*phi
 )*dx
 
 if args.advection:
@@ -153,7 +154,7 @@ dt_ss = -dt_s
 # negative s outward  propagation
 F1m = (
     inner(v, u - u0) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*Dh*div(v)
-    + phi*(D - D0) + dt_ss*H*div(uh)*phi
+    + phi*(D - D0) + dt_ss*div(uh*H)*phi
 )*dx
 
 if args.advection:
@@ -166,7 +167,7 @@ Dh = (D+D1)/2
 # negative s inward propagation
 F0m = (
     inner(v, u1 - u) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*Dh*div(v)
-    + phi*(D1 - D) + dt_ss*H*div(uh)*phi
+    + phi*(D1 - D) + dt_ss*div(uh*H)*phi
 )*dx
 
 if args.advection:
@@ -253,8 +254,6 @@ monoparameters_nt = {
     "patch_sub_pc_factor_shift_type": "nonzero",
 }
 
-
-
 if args.advection:
     params = monoparameters_ns
 else:
@@ -284,7 +283,7 @@ dt_ss = Constant(dt/nt)
 # positive s outward propagation
 F1p = (
     inner(v, u - u0) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*Dh*div(v)
-    + phi*(D - D0) + dt_ss*H*div(uh)*phi
+    + phi*(D - D0) + dt_ss*div(uh*H)*phi
 )*dx
 
 if args.advection:
@@ -400,7 +399,7 @@ dt_ss = dt_s
 # positive s inward propagation
 Fp = (
     inner(v, u1 - u) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*Dh*div(v)
-    + phi*(D1 - D) + dt_ss*H*div(uh)*phi
+    + phi*(D1 - D) + dt_ss*div(uh*H)*phi
 )*dx
 Fp += (inner(v, w_k*nu) + phi*w_k*nD)*dx
 if args.advection:
@@ -418,7 +417,7 @@ dt_ss = -dt_s
 # negative s inward propagation
 Fm = (
     inner(v, u1 - u) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*Dh*div(v)
-    + phi*(D1 - D) + dt_ss*H*div(uh)*phi
+    + phi*(D1 - D) + dt_ss*div(uh*H)*phi
 )*dx
 Fm += (inner(v, w_k*nu) + phi*w_k*nD)*dx
 if args.advection:
