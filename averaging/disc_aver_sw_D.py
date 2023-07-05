@@ -180,7 +180,7 @@ hparams = {
     'mat_type': 'matfree',
     'ksp_type': 'gmres',
     #'ksp_monitor': None,
-    'ksp_converged_reason': None,
+    #'ksp_converged_reason': None,
     'pc_type': 'python',
     'pc_python_type': 'firedrake.HybridizationPC',
     'hybridization': {'ksp_type': 'preonly',
@@ -291,7 +291,7 @@ if args.advection:
     F1p += dt_ss*advection(uh, ubar, v, vector=True)
     F1p += dt_ss*advection(Dh, ubar, phi,
                            continuity=True, vector=False)
-    
+
 forwardp_expProb_dt = LinearVariationalProblem(lhs(F1p), rhs(F1p), W1,
                                             constant_jacobian=constant_jacobian)
 forwardp_expsolver_dt = LinearVariationalSolver(forwardp_expProb_dt,
