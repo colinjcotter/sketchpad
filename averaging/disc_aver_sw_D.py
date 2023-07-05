@@ -553,7 +553,7 @@ while t < tmax - 0.5*dt:
     U1 += dt*Average/2
     # start all over again
     U0.assign(U1)
-    if dynamic_ubar:
+    if args.dynamic_ubar:
         ubar.assign(un)
     print("mass error", (mass0-assemble(U_D*dx))/Area)
     
