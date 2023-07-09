@@ -97,9 +97,9 @@ if args.advection:
     ubar = Function(V1)
 
 if args.dynamic_ubar:
-    constant_jacobian = True
-else:
     constant_jacobian = False
+else:
+    constant_jacobian = True
 
 def advection(F, ubar, v, continuity=False, vector=False, upwind=True):
     """
