@@ -30,6 +30,9 @@ args = args[0]
 if args.show_args:
     PETSc.Sys.Print(args)
 
+if args.mass_check:
+    print("Conducting mass conservation checks. Uses direct solver on mixed systems so not recommended for high resolution.")
+    
 ref_level = args.ref_level
 hours = args.dt
 dt = 60*60*hours
@@ -97,9 +100,9 @@ if args.advection:
     ubar = Function(V1)
 
 if args.dynamic_ubar:
-    constant_jacobian = False
-else:
     constant_jacobian = True
+else:
+    constant_jacobian = False
 
 def advection(F, ubar, v, continuity=False, vector=False, upwind=True):
     """
@@ -136,7 +139,9 @@ if args.advection:
     F1p += dt_ss*advection(uh, ubar, v, vector=True)
     F1p += dt_ss*advection(Dh, ubar, phi,
                            continuity=True, vector=False)
-
+    
+u0, D0 = split(W0)    
+    
 uh = (u+u1)/2
 Dh = (D+D1)/2
 # positive s inward propagation
@@ -200,6 +205,12 @@ mparams = {
     'fieldsplit_1_sub_pc_type':'ilu'
 }
 
+luparams = {
+    'ksp_type': 'preonly',
+    'pc_type': 'lu',
+    'pc_factor_mat_solver_type': 'mumps'
+}
+
 monoparameters_ns = {
     #"snes_monitor": None,
     "snes_lag_preconditioner": ns,
@@ -224,7 +235,7 @@ monoparameters_ns = {
     "patch_pc_patch_symmetrise_sweep": False,
     "patch_sub_ksp_type": "preonly",
     "patch_sub_pc_type": "lu",
-    "patch_sub_pc_factor_shift_type": "nonzero",
+    #"patch_sub_pc_factor_shift_type": "nonzero",
 }
 
 monoparameters_nt = {
@@ -251,29 +262,57 @@ monoparameters_nt = {
     "patch_pc_patch_symmetrise_sweep": False,
     "patch_sub_ksp_type": "preonly",
     "patch_sub_pc_type": "lu",
-    "patch_sub_pc_factor_shift_type": "nonzero",
+    #"patch_sub_pc_factor_shift_type": "nonzero",
 }
 
-if args.advection:
-    params = monoparameters_ns
-else:
-    params = hparams
+#if args.advection:
+#    params = monoparameters_ns
+#else:
+params = hparams
 
 # Set up the forward scatter
 forwardp_expProb = LinearVariationalProblem(lhs(F1p), rhs(F1p), W1,
                                             constant_jacobian=constant_jacobian)
 forwardp_expsolver = LinearVariationalSolver(forwardp_expProb,
                                                solver_parameters=params)
+if args.mass_check:
+    forwardp_expsolver = LinearVariationalSolver(forwardp_expProb,
+                                               solver_parameters=luparams)
+    pcg = PCG64(seed=123456789)
+    rg = RandomGenerator(pcg)
+    # beta distribution
+    f_rand = rg.normal(W, 0.0, 1.0)
+    W0.assign(f_rand)
+    W1.assign(f_rand)
+    forwardp_expsolver.solve()
+    _, Dcheck0 = split(W0)
+    _, Dcheck1 = split(W1)
+    print("F1p mass check", assemble((Dcheck0-Dcheck1)*dx)/Area)
+
+
 forwardm_expProb = LinearVariationalProblem(lhs(F1m), rhs(F1m), W1,
                                             constant_jacobian=constant_jacobian)
 forwardm_expsolver = LinearVariationalSolver(forwardm_expProb,
                                                solver_parameters=params)
+if args.mass_check:
+    forwardm_expsolver = LinearVariationalSolver(forwardm_expProb,
+                                               solver_parameters=luparams)
+    pcg = PCG64(seed=123456789)
+    rg = RandomGenerator(pcg)
+    # beta distribution
+    f_rand = rg.normal(W, 0.0, 1.0)
+    W0.assign(f_rand)
+    W1.assign(f_rand)
+    forwardm_expsolver.solve()
+    _, Dcheck0 = split(W0)
+    _, Dcheck1 = split(W1)
+    print("F1m mass check", assemble((Dcheck0-Dcheck1)*dx)/Area)
 
 # Set up the forward solver for dt propagation
-if args.advection:
-    params = monoparameters_nt
-else:
-    params = hparams
+#if args.advection:
+#    params = monoparameters_nt
+#else:
+params = hparams
 
 u, D = TrialFunctions(W)
 uh = (u0+u)/2
@@ -296,6 +335,20 @@ forwardp_expProb_dt = LinearVariationalProblem(lhs(F1p), rhs(F1p), W1,
 forwardp_expsolver_dt = LinearVariationalSolver(forwardp_expProb_dt,
                                                 solver_parameters=params)
 
+if args.mass_check:
+    forwardp_expsolver_dt = LinearVariationalSolver(forwardp_expProb_dt,
+                                                    solver_parameters=luparams)
+    pcg = PCG64(seed=123456789)
+    rg = RandomGenerator(pcg)
+    # beta distribution
+    f_rand = rg.normal(W, 0.0, 1.0)
+    W0.assign(f_rand)
+    W1.assign(f_rand)
+    forwardp_expsolver_dt.solve()
+    _, Dcheck0 = split(W0)
+    _, Dcheck1 = split(W1)
+    print("F1p mass check dt", assemble((Dcheck0-Dcheck1)*dx)/Area)
+
 # Set up the backward scatter
 if args.advection:
     params = monoparameters_ns
@@ -306,10 +359,38 @@ backwardp_expProb = LinearVariationalProblem(lhs(F0p), rhs(F0p), W0,
                                              constant_jacobian=constant_jacobian)
 backwardp_expsolver = LinearVariationalSolver(backwardp_expProb,
                                                 solver_parameters=params)
+
+if args.mass_check:
+    backwardp_expsolver = LinearVariationalSolver(backwardp_expProb,
+                                                    solver_parameters=luparams)
+    pcg = PCG64(seed=123456789)
+    rg = RandomGenerator(pcg)
+    # beta distribution
+    f_rand = rg.normal(W, 0.0, 1.0)
+    W0.assign(f_rand)
+    W1.assign(f_rand)
+    backwardp_expsolver.solve()
+    _, Dcheck0 = split(W0)
+    _, Dcheck1 = split(W1)
+    print("F0p mass check", assemble((Dcheck0-Dcheck1)*dx)/Area)
+
 backwardm_expProb = LinearVariationalProblem(lhs(F0m), rhs(F0m), W0,
                                              constant_jacobian=constant_jacobian)
 backwardm_expsolver = LinearVariationalSolver(backwardm_expProb,
                                                 solver_parameters=params)
+if args.mass_check:
+    backwardm_expsolver = LinearVariationalSolver(backwardm_expProb,
+                                                    solver_parameters=luparams)
+    pcg = PCG64(seed=123456789)
+    rg = RandomGenerator(pcg)
+    # beta distribution
+    f_rand = rg.normal(W, 0.0, 1.0)
+    W0.assign(f_rand)
+    W1.assign(f_rand)
+    backwardm_expsolver.solve()
+    _, Dcheck0 = split(W0)
+    _, Dcheck1 = split(W1)
+    print("F0m mass check", assemble((Dcheck0-Dcheck1)*dx)/Area)
 
 # Set up the nonlinear operator W -> N(W)
 gradperp = lambda f: perp(grad(f))
@@ -369,6 +450,17 @@ NProb = LinearVariationalProblem(lhs(L), rhs(L), N,
 NSolver = LinearVariationalSolver(NProb,
                                   solver_parameters = mparams)
 
+if args.mass_check:
+    NSolver = LinearVariationalSolver(NProb, solver_parameters = luparams)
+    pcg = PCG64(seed=123456789)
+    rg = RandomGenerator(pcg)
+    # beta distribution
+    f_rand = rg.normal(W, 0.0, 1.0)
+    W1.assign(f_rand)
+    NSolver.solve()
+    nu, nD = split(N)
+    print("Nonlinear mass check", assemble(nD*dx)/Area)
+
 # Set up the backward gather
 X0 = Function(W)
 X1 = Function(W)
@@ -412,6 +504,23 @@ XProbp = LinearVariationalProblem(lhs(Fp), rhs(Fp), X0,
                                   constant_jacobian=constant_jacobian)
 Xpsolver = LinearVariationalSolver(XProbp,
                                   solver_parameters = params)
+if args.mass_check:
+    Xpsolver = LinearVariationalSolver(XProbp,
+                                       solver_parameters=luparams)
+    pcg = PCG64(seed=123456789)
+    rg = RandomGenerator(pcg)
+    # beta distribution
+    f_rand = rg.normal(W, 0.0, 1.0)
+    W0.assign(f_rand)
+    W1.assign(f_rand)
+    X0.assign(f_rand)
+    X1.assign(f_rand)
+    NSolver.solve()
+    Xpsolver.solve()
+    _, Dcheck0 = split(X0)
+    _, Dcheck1 = split(X1)
+    print("Xp mass check", assemble((Dcheck0-Dcheck1)*dx)/Area)
+
 
 dt_ss = -dt_s
 # negative s inward propagation
@@ -428,6 +537,23 @@ XProbm = LinearVariationalProblem(lhs(Fm), rhs(Fm), X0,
                                   constant_jacobian=constant_jacobian)
 Xmsolver = LinearVariationalSolver(XProbm,
                                   solver_parameters = params)
+
+if args.mass_check:
+    Xmsolver = LinearVariationalSolver(XProbm,
+                                       solver_parameters=luparams)
+    pcg = PCG64(seed=123456789)
+    rg = RandomGenerator(pcg)
+    # beta distribution
+    f_rand = rg.normal(W, 0.0, 1.0)
+    W0.assign(f_rand)
+    W1.assign(f_rand)
+    X0.assign(f_rand)
+    X1.assign(f_rand)
+    NSolver.solve()
+    Xmsolver.solve()
+    _, Dcheck0 = split(X0)
+    _, Dcheck1 = split(X1)
+    print("Xm mass check", assemble((Dcheck0-Dcheck1)*dx)/Area)
 
 # total number of points is 2ns + 1, because we have s=0
 # after forward loop, W1 contains value at time ns*ds
@@ -562,6 +688,10 @@ file_sw.write(un, etan, b)
 
 mass0 = assemble(U_D*dx)
 
+if args.mass_check:
+    tmax = -666.
+    t = 0.
+
 print ('tmax', tmax, 'dt', dt)
 while t < tmax - 0.5*dt:
     print(t)
@@ -603,6 +733,7 @@ while t < tmax - 0.5*dt:
     print("RK stage 1")
     propagate(U0, U1, t=t)
     U1 /= 2
+    
     # Compute U^* = exp(dt L)[ U^n + dt*<exp(-sL)N(exp(sL)U^n)>_s]
     average(U0, Average, positive=True, t=t)
     Ustar.assign(U0 + dt*Average)
