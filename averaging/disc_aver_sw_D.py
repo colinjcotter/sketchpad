@@ -132,7 +132,7 @@ dt_ss = dt_s
 # positive s outward propagation
 F1p = (
     inner(v, u - u0) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*Dh*div(v)
-    + phi*(D - D0) + dt_ss*H*div(uh)*phi
+    + phi*(D - D0) + dt_ss*div(H*uh)*phi
 )*dx
 
 if args.advection:
