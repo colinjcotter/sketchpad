@@ -23,6 +23,7 @@ parser.add_argument('--vector_invariant', action="store_true", help='use vector 
 parser.add_argument('--eta', action="store_true", help='use eta instead of D.')
 parser.add_argument('--show_args', action='store_true', help='Output all the arguments.')
 parser.add_argument('--mass_check', action='store_true', help='Check mass conservation in the solver.')
+parser.add_argument('--linear', action='store_true', help='Just solve the linearpropagator at each step (as if N=0).')
 
 args = parser.parse_known_args()
 args = args[0]
@@ -64,7 +65,9 @@ mesh.init_cell_orientations(cx)
 cx, cy, cz = SpatialCoordinate(mesh)
 
 outward_normals = CellNormal(mesh)
-perp = lambda u: cross(outward_normals, u)
+DG2 = VectorFunctionSpace(mesh, "DG", 2)
+outward_normals_appx = Function(DG2).interpolate(outward_normals)
+perp = lambda u: cross(outward_normals_appx, u)
     
 V1 = FunctionSpace(mesh, "BDM", 2)
 V2 = FunctionSpace(mesh, "DG", 1)
@@ -732,21 +735,22 @@ while t < tmax - 0.5*dt:
     # Compute B^n = exp(dt L)U^n
     print("RK stage 1")
     propagate(U0, U1, t=t)
-    U1 /= 2
-    
-    # Compute U^* = exp(dt L)[ U^n + dt*<exp(-sL)N(exp(sL)U^n)>_s]
-    average(U0, Average, positive=True, t=t)
-    Ustar.assign(U0 + dt*Average)
-    average(U0, Average, positive=False, t=t)
-    Ustar += dt*Average
-    propagate(Ustar, Ustar, t=t)
-    # compute U^{n+1} = (B^n + U^*)/2 + dt*<exp(-sL)N(exp(sL)U^*)>/2
-    print("RK stage 2")
-    average(Ustar, Average, positive=True, t=t)
-    U1 += Ustar/2 + dt*Average/2
-    average(Ustar, Average, positive=False, t=t)
-    U1 += dt*Average/2
-    # start all over again
+    if not args.linear:
+        U1 /= 2
+        
+        # Compute U^* = exp(dt L)[ U^n + dt*<exp(-sL)N(exp(sL)U^n)>_s]
+        average(U0, Average, positive=True, t=t)
+        Ustar.assign(U0 + dt*Average)
+        average(U0, Average, positive=False, t=t)
+        Ustar += dt*Average
+        propagate(Ustar, Ustar, t=t)
+        # compute U^{n+1} = (B^n + U^*)/2 + dt*<exp(-sL)N(exp(sL)U^*)>/2
+        print("RK stage 2")
+        average(Ustar, Average, positive=True, t=t)
+        U1 += Ustar/2 + dt*Average/2
+        average(Ustar, Average, positive=False, t=t)
+        U1 += dt*Average/2
+        # start all over again
     U0.assign(U1)
     if args.dynamic_ubar:
         projection_solver.solve()
