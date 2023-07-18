@@ -24,6 +24,7 @@ parser.add_argument('--eta', action="store_true", help='use eta instead of D.')
 parser.add_argument('--show_args', action='store_true', help='Output all the arguments.')
 parser.add_argument('--mass_check', action='store_true', help='Check mass conservation in the solver.')
 parser.add_argument('--linear', action='store_true', help='Just solve the linearpropagator at each step (as if N=0).')
+parser.add_argument('--linear_velocity', action='store_true', help='Drop the velocity advection from N.')
 
 args = parser.parse_known_args()
 args = args[0]
@@ -413,15 +414,16 @@ L = inner(nu, v)*dx + nD*phi*dx
 if not args.eta:
     L -= div(v)*g*b*dx
 
-if vector_invariant:
-    L -= (
-        + inner(perp(grad(inner(v, perp(u1)))), u1)*dx
-        - inner(both(perp(n)*inner(v, perp(u1))),
-                both(Upwind*u1))*dS
-        + div(v)*K*dx
-    )
-else:
-    L += advection(u1, u1, v, vector=True)
+if not args.linear_velocity:
+    if vector_invariant:
+        L -= (
+            + inner(perp(grad(inner(v, perp(u1)))), u1)*dx
+            - inner(both(perp(n)*inner(v, perp(u1))),
+                    both(Upwind*u1))*dS
+            + div(v)*K*dx
+        )
+    else:
+        L += advection(u1, u1, v, vector=True)
 if args.eta:
     L += advection(D1, u1, phi, continuity=True, vector=False)
 else:
@@ -437,7 +439,8 @@ else:
 # last term disappears when div ubar = 0.
 
 if args.advection:
-    L -= advection(u1, ubar, v, vector=True)
+    if not args.linear_velocity:
+        L -= advection(u1, ubar, v, vector=True)
     if args.eta:
         L -= advection(D1, ubar, phi, continuity=True, vector=False)
     else:
