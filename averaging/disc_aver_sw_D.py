@@ -419,16 +419,13 @@ if vector_invariant:
         - inner(both(perp(n)*inner(v, perp(u1))),
                 both(Upwind*u1))*dS
         + div(v)*K*dx
-        + inner(grad(phi), u1*D1)*dx
-        - jump(phi)*(uup('+')*D1('+')
-                     - uup('-')*D1('-'))*dS
     )
 else:
     L += advection(u1, u1, v, vector=True)
-    if args.eta:
-        L += advection(D1, u1, phi, continuity=True, vector=False)
-    else:
-        L += advection(D1-H, u1, phi, continuity=True, vector=False)
+if args.eta:
+    L += advection(D1, u1, phi, continuity=True, vector=False)
+else:
+    L += advection(D1-H, u1, phi, continuity=True, vector=False)
 
 # for args.eta True we have eta_t + div(u(eta+H)) = eta_t + div(uH) + div(u*eta) [linear and nonlinear]
 # otherwise we have D_t + div(uD) = D_t + div(uH) + div(u(D-H))
