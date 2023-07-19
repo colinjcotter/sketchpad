@@ -25,6 +25,7 @@ parser.add_argument('--show_args', action='store_true', help='Output all the arg
 parser.add_argument('--mass_check', action='store_true', help='Check mass conservation in the solver.')
 parser.add_argument('--linear', action='store_true', help='Just solve the linearpropagator at each step (as if N=0).')
 parser.add_argument('--linear_velocity', action='store_true', help='Drop the velocity advection from N.')
+parser.add_argument('--linear_height', action='store_true', help='Drop the height advection from N.')
 
 args = parser.parse_known_args()
 args = args[0]
@@ -424,10 +425,11 @@ if not args.linear_velocity:
         )
     else:
         L += advection(u1, u1, v, vector=True)
-if args.eta:
-    L += advection(D1, u1, phi, continuity=True, vector=False)
-else:
-    L += advection(D1-H, u1, phi, continuity=True, vector=False)
+if not args.linear_height:
+    if args.eta:
+        L += advection(D1, u1, phi, continuity=True, vector=False)
+    else:
+        L += advection(D1-H, u1, phi, continuity=True, vector=False)
 
 # for args.eta True we have eta_t + div(u(eta+H)) = eta_t + div(uH) + div(u*eta) [linear and nonlinear]
 # otherwise we have D_t + div(uD) = D_t + div(uH) + div(u(D-H))
@@ -441,10 +443,11 @@ else:
 if args.advection:
     if not args.linear_velocity:
         L -= advection(u1, ubar, v, vector=True)
-    if args.eta:
-        L -= advection(D1, ubar, phi, continuity=True, vector=False)
-    else:
-        L -= advection(D1, ubar, phi, continuity=True, vector=False)
+    if not args.linear_height:
+        if args.eta:
+            L -= advection(D1, ubar, phi, continuity=True, vector=False)
+        else:
+            L -= advection(D1, ubar, phi, continuity=True, vector=False)
 
 #with topography, D = H + eta - b
 
