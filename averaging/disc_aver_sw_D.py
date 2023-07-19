@@ -412,6 +412,9 @@ vector_invariant = args.vector_invariant
 # Sign confusions! We are solving for nu, nD, but
 # equation is written in the form (nu, nD) - N(u1, D1) = 0.
 L = inner(nu, v)*dx + nD*phi*dx
+# Hack to unify code when no nonlinearity
+Zero = Function(V2).assign(0.)
+L += phi*Zero*dx
 if not args.eta:
     L -= div(v)*g*b*dx
 
