@@ -441,7 +441,6 @@ if not args.linear_height:
 # combining with args.advection True
 # for args.eta True we have eta_t + [div(uH) + div(ubar*eta)] + div(u*eta - ubar*eta) [linear in square brackets]
 # otherwise we have D_t + [div(uH) + div(ubar*D)] + div((u(D-H) - ubar*D) [linear in square brackets]
-# last term disappears when div ubar = 0.
 
 if args.advection:
     if not args.linear_velocity:
