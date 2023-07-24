@@ -573,11 +573,17 @@ if args.mass_check:
 # compute N, use to propagate X back, propagate W back
 # don't need to propagate W back on last step though
 
-svals = 0.5 + np.arange(2*ns)/2/ns/2 #tvals goes from -rho*dt/2 to rho*dt/2
+# true svals goes from -rho*dt/2 to rho*dt/2
+# this is shifted to [0,1] and only compute the second half
+svals = 0.5 + np.arange(ns)/ns/2
+# don't include 1 because we'll get NaN
 weights = np.exp(-1.0/svals/(1.0-svals))
-weights = weights[ns:]
+# half the 0 point because it is counted twice
+# once for positive s and once for negative s
 weights[0] /= 2
+# renormalise and then half because once for each sign
 weights = weights/np.sum(weights)/2
+# include a 0 on the end
 weights = np.concatenate((weights, [0]))
 
 # Function to take in current state V and return dV/dt
@@ -597,6 +603,7 @@ def average(V, dVdt, positive=True, t=None):
     for step in ProgressBar(f'average backward').iter(range(ns, -1, -1)):
         # compute N
         with PETSc.Log.Event("nonlinearity"):
+            w_k.assign(weights[step])
             NSolver.solve()
         # propagate X back
         with PETSc.Log.Event("backward integration"):
@@ -607,7 +614,6 @@ def average(V, dVdt, positive=True, t=None):
         X1.assign(X0)
         # back propagate W
         if step > 0:
-            w_k.assign(weights[step])
             with PETSc.Log.Event("backward propagation ds"):
                 if positive:
                     backwardp_expsolver.solve()
