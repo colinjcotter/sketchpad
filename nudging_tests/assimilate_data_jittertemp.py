@@ -16,8 +16,10 @@ xpoints = 40
 model = Camsholm(100, nsteps, xpoints)
 MALA = True
 verbose = True
-jtfilter = jittertemp_filter(n_temp=4, n_jitt = 4, delta = 0.1,
-                             verbose=verbose, MALA=MALA)
+nudging = True
+jtfilter = jittertemp_filter(n_jitt = 4, delta = 0.1,
+                             verbose=verbose, MALA=MALA,
+                             nudging=True)
 
 nensemble = [5,5,5,5]
 jtfilter.setup(nensemble, model)
@@ -47,74 +49,13 @@ N_obs = y.shape[0]
 
 yVOM = Function(model.VVOM)
 
-# prepare shared arrays for data
-y_e_list = []
-y_sim_obs_list = []
-for m in range(y.shape[1]):        
-    y_e_shared = SharedArray(partition=nensemble, 
-                                  comm=jtfilter.subcommunicators.ensemble_comm)
-    y_sim_obs_shared = SharedArray(partition=nensemble, 
-                                 comm=jtfilter.subcommunicators.ensemble_comm)
-    y_e_list.append(y_e_shared)
-    y_sim_obs_list.append(y_sim_obs_shared)
-
-ys = y.shape
-if COMM_WORLD.rank == 0:
-    y_e = np.zeros((np.sum(nensemble), ys[0], ys[1]))
-    y_e_asmfwd = np.zeros((np.sum(nensemble), ys[0], ys[1]))
-    y_sim_obs_alltime_step = np.zeros((np.sum(nensemble),nsteps,  ys[1]))
-    y_sim_obs_allobs_step = np.zeros((np.sum(nensemble),nsteps*N_obs,  ys[1]))
-
-mylist = []
-def mycallback(ensemble):
-   xpt = np.arange(0.5,40.0) # need to change the according to generate data
-   X = ensemble[0]
-   mylist.append(X.at(xpt))
-
 # do assimiliation step
 for k in range(N_obs):
     PETSc.Sys.Print("Step", k)
     yVOM.dat.data[:] = y[k, :]
 
-
-    # make a copy so that we don't overwrite the initial condition
-    # in the next step
-    for i in  range(nensemble[jtfilter.ensemble_rank]):
-        for p in range(len(jtfilter.new_ensemble[i])):
-            jtfilter.new_ensemble[i][p].assign(jtfilter.ensemble[i][p])
-        model.randomize(jtfilter.new_ensemble[i])
-
-    # Compute simulated observations using "prior" distribution
-    # i.e. before we have used the observed data
-    for step in range(nsteps):
-        for i in  range(nensemble[jtfilter.ensemble_rank]):
-            model.run(jtfilter.new_ensemble[i], jtfilter.new_ensemble[i])
-            # note, not safe in spatial parallel
-            fwd_simdata = model.obs().dat.data[:]
-            for m in range(y.shape[1]):
-                y_sim_obs_list[m].dlocal[i] = fwd_simdata[m]
-
-
-        for m in range(y.shape[1]):
-            y_sim_obs_list[m].synchronise()
-            if COMM_WORLD.rank == 0:
-                y_sim_obs_alltime_step[:, step, m] = y_sim_obs_list[m].data()
-                y_sim_obs_allobs_step[:,nsteps*k+step,m] = y_sim_obs_alltime_step[:, step, m]                
-
     # actually do the data assimilation step
     jtfilter.assimilation_step(yVOM, log_likelihood)
-
-        
-    for i in range(nensemble[jtfilter.ensemble_rank]):
-        model.w0.assign(jtfilter.ensemble[i][0])
-        obsdata = model.obs().dat.data[:]
-        for m in range(y.shape[1]):
-            y_e_list[m].dlocal[i] = obsdata[m]    
-
-    for m in range(y.shape[1]):
-        y_e_list[m].synchronise()
-        if COMM_WORLD.rank == 0:
-            y_e[:, k, m] = y_e_list[m].data()
 
 if COMM_WORLD.rank == 0:
     print("Time shape", y_sim_obs_alltime_step.shape)
