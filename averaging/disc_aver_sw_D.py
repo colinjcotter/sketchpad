@@ -1,6 +1,6 @@
 from firedrake import *
 import numpy as np
-import mg
+#import mg
 
 from firedrake.petsc import PETSc
 print = PETSc.Sys.Print
@@ -11,10 +11,10 @@ parser = argparse.ArgumentParser(description='Williamson 5 testcase for averaged
 parser.add_argument('--ref_level', type=int, default=3, help='Refinement level of icosahedral grid. Default 3.')
 parser.add_argument('--tmax', type=float, default=360, help='Final time in hours. Default 24x15=360.')
 parser.add_argument('--dumpt', type=float, default=6, help='Dump time in hours. Default 6.')
-parser.add_argument('--dt', type=float, default=3, help='Timestep in hours. Default 3.')
-parser.add_argument('--ns', type=int, default=10, help='Number of s steps in exponential approximation for average')
-parser.add_argument('--nt', type=int, default=10, help='Number of t steps in exponential approximation for time propagator')
-parser.add_argument('--alpha', type=float, default=1, help='Averaging window width as a multiple of dt. Default 1.')
+parser.add_argument('--dt', type=float, default=0.25, help='Timestep in hours. Default 3.')
+parser.add_argument('--ns', type=int, default=5, help='Number of s steps in exponential approximation for average')
+parser.add_argument('--nt', type=int, default=3, help='Number of t steps in exponential approximation for time propagator')
+parser.add_argument('--alpha', type=float, default=2, help='Averaging window width as a multiple of dt. Default 1.')
 parser.add_argument('--filename', type=str, default='w2', help='filename for pvd')
 parser.add_argument('--check', action="store_true", help='print out some information about frequency resolution and exit')
 parser.add_argument('--advection', action="store_true", help='include mean flow advection in L.')
@@ -29,6 +29,8 @@ parser.add_argument('--linear_height', action='store_true', help='Drop the heigh
 
 args = parser.parse_known_args()
 args = args[0]
+
+print(args)
 
 if args.show_args:
     PETSc.Sys.Print(args)
@@ -45,28 +47,31 @@ dt_s = Constant(dts)
 ns = args.ns
 nt = args.nt
 
+# print out ppp
+eigs = [0.003465, 0.007274, 0.014955] #maximum frequency for ref 3-5
+eig = eigs[ref_level-3]
+# if we are doing exp(tL) then minimum period is period of exp(it*eig)
+# which is 2*pi/eig
+min_period = 2*np.pi/eig
+print("ds steps per min wavelength", min_period/dts)
+print("dt steps per min wavelength", min_period/dt*nt)
+
 if args.check:
-    eigs = [0.003465, 0.007274, 0.014955] #maximum frequency for ref 3-5
-    eig = eigs[ref_level-3]
-    # if we are doing exp(tL) then minimum period is period of exp(it*eig)
-    # which is 2*pi/eig
-    min_period = 2*np.pi/eig
-    print("ds steps per min wavelength", min_period/dts)
-    print("dt steps per min wavelength", min_period/dt*nt)
     import sys; sys.exit()
 
 #some domain, parameters and FS setup
 R0 = 6371220.
 H0 = Constant(5960.)
 
+mesh_degree = 3
 mesh = IcosahedralSphereMesh(radius=R0,
-                             refinement_level=ref_level, degree=3)
+                             refinement_level=ref_level, degree=mesh_degree)
 cx = SpatialCoordinate(mesh)
 mesh.init_cell_orientations(cx)
 
 cx, cy, cz = SpatialCoordinate(mesh)
 
-outward_normals = CellNormal(mesh)
+outward_normals = interpolate(CellNormal(mesh),VectorFunctionSpace(mesh,"DG",mesh_degree))
 DG2 = VectorFunctionSpace(mesh, "DG", 2)
 outward_normals_appx = Function(DG2).interpolate(outward_normals)
 perp = lambda u: cross(outward_normals_appx, u)
@@ -585,6 +590,8 @@ weights[0] /= 2
 weights = weights/np.sum(weights)/2
 # include a 0 on the end
 weights = np.concatenate((weights, [0]))
+
+print(weights)
 
 # Function to take in current state V and return dV/dt
 def average(V, dVdt, positive=True, t=None):
