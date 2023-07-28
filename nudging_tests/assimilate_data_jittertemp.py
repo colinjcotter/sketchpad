@@ -13,7 +13,7 @@ from nudging.models.stochastic_Camassa_Holm import Camsholm
 
 nsteps = 5
 xpoints = 40
-model = Camsholm(100, nsteps, xpoints)
+model = Camsholm(100, nsteps, xpoints, lambdas=True)
 MALA = True
 verbose = True
 nudging = True
