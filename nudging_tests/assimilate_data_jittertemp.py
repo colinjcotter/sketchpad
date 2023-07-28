@@ -19,7 +19,7 @@ verbose = True
 nudging = True
 jtfilter = jittertemp_filter(n_jitt = 4, delta = 0.1,
                              verbose=verbose, MALA=MALA,
-                             nudging=True)
+                             nudging=True, visualise_tape=True)
 
 nensemble = [5,5,5,5]
 jtfilter.setup(nensemble, model)
@@ -41,7 +41,7 @@ for i in range(nensemble[jtfilter.ensemble_rank]):
 def log_likelihood(y, Y):
     ll = (y-Y)**2/0.05**2/2*dx
     return ll
-    
+
 #Load data
 y_exact = np.load('y_true.npy')
 y = np.load('y_obs.npy') 
@@ -64,3 +64,7 @@ if COMM_WORLD.rank == 0:
     np.save("assimilated_ensemble.npy", y_e)
     np.save("simualated_all_time_obs.npy", y_sim_obs_allobs_step)
 
+"""
+Debugging notes
+replaced R space with DG 0, still issue
+"""
