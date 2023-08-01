@@ -13,7 +13,7 @@ parser.add_argument('--tmax', type=float, default=360, help='Final time in hours
 parser.add_argument('--dumpt', type=float, default=6, help='Dump time in hours. Default 6.')
 parser.add_argument('--dt', type=float, default=0.25, help='Timestep in hours. Default 3.')
 parser.add_argument('--ns', type=int, default=5, help='Number of s steps in exponential approximation for average')
-parser.add_argument('--nt', type=int, default=3, help='Number of t steps in exponential approximation for time propagator')
+parser.add_argument('--nt', type=int, default=4, help='Number of t steps in exponential approximation for time propagator')
 parser.add_argument('--alpha', type=float, default=2, help='Averaging window width as a multiple of dt. Default 1.')
 parser.add_argument('--filename', type=str, default='w2', help='filename for pvd')
 parser.add_argument('--check', action="store_true", help='print out some information about frequency resolution and exit')
@@ -26,10 +26,11 @@ parser.add_argument('--mass_check', action='store_true', help='Check mass conser
 parser.add_argument('--linear', action='store_true', help='Just solve the linearpropagator at each step (as if N=0).')
 parser.add_argument('--linear_velocity', action='store_true', help='Drop the velocity advection from N.')
 parser.add_argument('--linear_height', action='store_true', help='Drop the height advection from N.')
+parser.add_argument('--timestepping', type=str, default='heuns', choices=['rk4', 'heuns'], help='Choose a time steeping method. Default heuns.')
 
 args = parser.parse_known_args()
 args = args[0]
-
+timestepping = args.timestepping
 print(args)
 
 if args.show_args:
@@ -46,6 +47,10 @@ dts = alpha*dt/args.ns
 dt_s = Constant(dts)
 ns = args.ns
 nt = args.nt
+
+if nt % 2 == 1:
+    print('nt is an odd number. exit')
+    import sys; sys.exit()
 
 # print out ppp
 eigs = [0.003465, 0.007274, 0.014955] #maximum frequency for ref 3-5
@@ -631,10 +636,11 @@ def average(V, dVdt, positive=True, t=None):
     dVdt.assign(X0)
 
 # Function to apply forward propagation in t
-def propagate(V_in, V_out, t=None):
+def propagate(V_in, V_out, t=None, val=1):
     W0.assign(V_in)
+    nts = int(nt*val)
     # forward scatter
-    for step in ProgressBar(f'propagate').iter(range(nt)):
+    for step in ProgressBar(f'propagate').iter(range(nts)):
         with PETSc.Log.Event("forward propagation dt"):
             forwardp_expsolver_dt.solve()
             W0.assign(W1)
@@ -686,17 +692,6 @@ if args.eta:
 else:
     Dn = Function(V2, name="Depth").interpolate(eta_expr + H - b)
 
-U0 = Function(W)
-U1 = Function(W)
-Ustar = Function(W)
-Average = Function(W)
-
-# set up initial conditions
-U_u, U_D = U0.subfunctions
-U1_u, U1_D = U1.subfunctions
-U_u.assign(un)
-U_D.assign(Dn)
-
 etan = Function(V2, name="Elevation")
 
 name = args.filename
@@ -706,6 +701,23 @@ if args.eta:
 else:
     etan.assign(Dn-H0+b)
 file_sw.write(un, etan, b)
+
+U0 = Function(W)
+U1 = Function(W)
+U2 = Function(W)
+U3 = Function(W)
+Ustar = Function(W)
+Average = Function(W)
+V1 = Function(W)
+V2 = Function(W)
+V3 = Function(W)
+V = Function(W)
+
+# set up initial conditions
+U_u, U_D = U0.subfunctions
+U1_u, U1_D = U1.subfunctions
+U_u.assign(un)
+U_D.assign(Dn)
 
 mass0 = assemble(U_D*dx)
 
@@ -719,57 +731,94 @@ while t < tmax - 0.5*dt:
     t += dt
     tdump += dt
 
-    # V_t = <exp(-(t+s)L)N(exp((t+s)L)V)>_s
+    if timestepping == 'heuns':
+        # V_t = <exp(-(t+s)L)N(exp((t+s)L)V)>_s
     
-    # V^* = V^n + dt*f(V^n)
-    # V^{n+1} = V^n + dt*f((V^n + V^*)/2)
+        # V^* = V^n + dt*f(V^n)
+        # V^{n+1} = V^n + dt*f((V^n + V^*)/2)
 
-    # V = exp(-tL)U
-    # U = exp(tL)V
+        # V = exp(-tL)U
+        # U = exp(tL)V
 
-    # STEP 1
-    # t is time at start of timestep
-    # exp(-(t+dt)L)U^* = exp(-tL)U^n + dt*<exp(-(t+s)L)N(
-    #                                         exp((t+s)L)V^n)>_s
-    # exp(-(t+dt)L)U^* = exp(-tL)U^n + dt*<exp(-(t+s)L)N(exp(sL)U^n)>_s
-    # so
-    # U^* = exp(dt L)[ U^n + dt*<exp(-sL)N(exp(sL)U^n)>_s]
+        # STEP 1
+        # t is time at start of timestep
+        # exp(-(t+dt)L)U^* = exp(-tL)U^n + dt*<exp(-(t+s)L)N(
+        #                                         exp((t+s)L)V^n)>_s
+        # exp(-(t+dt)L)U^* = exp(-tL)U^n + dt*<exp(-(t+s)L)N(exp(sL)U^n)>_s
+        # so
+        # U^* = exp(dt L)[ U^n + dt*<exp(-sL)N(exp(sL)U^n)>_s]
 
-    # STEP 2
-    # exp(-(t+dt)L)U^{n+1} = exp(-tL)U^n + dt*<
-    #                  exp(-(t+s)L)N(exp((t+s)L)V^n)/2
-    #                +exp(-(t+dt+s)L)N(exp((t+dt+s)L)V^*)/2>
-    # so
-    # exp(-(t+dt)L)U^{n+1} = exp(-tL)U^n + dt*<
-    #                  exp(-(t+s)L)N(exp(sL)U^n)/2
-    #                +exp(-(t+dt+s)L)N(exp(sL)U^*)/2>
-    # s0
-    # U^{n+1} = exp(dt L)[U^n + dt*<
-    #                  exp(-sL)N(exp(sL)U^n)>/2]
-    #                +dt*<exp(-sL)N(exp(sL)U^*)>/2
-    #         = exp(dt L)U^n/2 + U^*/2 + dt*<exp(-sL)N(exp(sL)U^*)>/2
+        # STEP 2
+        # exp(-(t+dt)L)U^{n+1} = exp(-tL)U^n + dt*<
+        #                  exp(-(t+s)L)N(exp((t+s)L)V^n)/2
+        #                +exp(-(t+dt+s)L)N(exp((t+dt+s)L)V^*)/2>
+        # so
+        # exp(-(t+dt)L)U^{n+1} = exp(-tL)U^n + dt*<
+        #                  exp(-(t+s)L)N(exp(sL)U^n)/2
+        #                +exp(-(t+dt+s)L)N(exp(sL)U^*)/2>
+        # s0
+        # U^{n+1} = exp(dt L)[U^n + dt*<
+        #                  exp(-sL)N(exp(sL)U^n)>/2]
+        #                +dt*<exp(-sL)N(exp(sL)U^*)>/2
+        #         = exp(dt L)U^n/2 + U^*/2 + dt*<exp(-sL)N(exp(sL)U^*)>/2
 
-    # steps are then
-    # Compute B^n = exp(dt L)U^n
-    print("RK stage 1")
-    propagate(U0, U1, t=t)
-    if not args.linear:
-        U1 /= 2
+        # steps are then
+        # Compute B^n = exp(dt L)U^n
+        print("RK stage 1")
+        propagate(U0, U1, t=t)
+        if not args.linear:
+            U1 /= 2
         
-        # Compute U^* = exp(dt L)[ U^n + dt*<exp(-sL)N(exp(sL)U^n)>_s]
-        average(U0, Average, positive=True, t=t)
-        Ustar.assign(U0 + dt*Average)
-        average(U0, Average, positive=False, t=t)
-        Ustar += dt*Average
-        propagate(Ustar, Ustar, t=t)
-        # compute U^{n+1} = (B^n + U^*)/2 + dt*<exp(-sL)N(exp(sL)U^*)>/2
-        print("RK stage 2")
-        average(Ustar, Average, positive=True, t=t)
-        U1 += Ustar/2 + dt*Average/2
-        average(Ustar, Average, positive=False, t=t)
-        U1 += dt*Average/2
+            # Compute U^* = exp(dt L)[ U^n + dt*<exp(-sL)N(exp(sL)U^n)>_s]
+            average(U0, Average, positive=True, t=t)
+            Ustar.assign(U0 + dt*Average)
+            average(U0, Average, positive=False, t=t)
+            Ustar += dt*Average
+            propagate(Ustar, Ustar, t=t)
+            # compute U^{n+1} = (B^n + U^*)/2 + dt*<exp(-sL)N(exp(sL)U^*)>/2
+            print("RK stage 2")
+            average(Ustar, Average, positive=True, t=t)
+            U1 += Ustar/2 + dt*Average/2
+            average(Ustar, Average, positive=False, t=t)
+            U1 += dt*Average/2
         # start all over again
-    U0.assign(U1)
+        U0.assign(U1)
+    elif timestepping == 'rk4':
+        print("RK stage 1")
+        average(U0, Average, positive=True, t=t)
+        V1.assign(dt*Average)
+        average(U0, Average, positive=False, t=t)
+        V1 += dt*Average
+        U1.assign(U0 + V1/2)
+
+        print("RK stage 2")
+        propagate(U1, U1, t=t, val=0.5)
+        average(U1, Average, positive=True, t=t)
+        V2.assign(dt*Average)
+        average(U1, Average, positive=False, t=t)
+        V2 += dt*Average
+        propagate(U0, V, t=t, val=0.5)
+        U2.assign(V + V2/2)
+
+        print("RK stage 3")
+        average(U2, Average, positive=True, t=t)
+        V3.assign(dt*Average)
+        average(U2, Average, positive=False, t=t)
+        V3 += dt*Average
+        U3.assign(V + V3)
+
+        print("RK stage 4")
+        U1.assign(V2 + V3)
+        propagate(U1, U2, t=t, val=0.5)
+        propagate(U3, V3, t=t, val=0.5)
+        average(V3, Average, positive=True, t=t)
+        U3.assign(dt*Average)
+        average(V3, Average, positive=False, t=t)
+        U3 += dt*Average
+        propagate(V1, U1, t=t)
+        propagate(U0, V, t=t)
+        U0.assign(V + 1/6*U1 + 1/3*U2 + 1/6*U3)
+
     if args.dynamic_ubar:
         projection_solver.solve()
         u, _ = Uproj.subfunctions
