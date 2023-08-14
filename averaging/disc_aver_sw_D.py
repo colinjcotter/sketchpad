@@ -483,8 +483,7 @@ if args.advection:
 
 #with topography, D = H + eta - b
 
-NProb = NonlinearVariationalProblem(lhs(L), rhs(L), N,
-                                 constant_jacobian=True)
+NProb = NonlinearVariationalProblem(L, N)
 NSolver = NonlinearVariationalSolver(NProb,
                                   solver_parameters = monoparameters_N)
 
@@ -635,6 +634,8 @@ def average(V, dVdt, positive=True, t=None):
         with PETSc.Log.Event("nonlinearity"):
             w_k.assign(weights[step])
             NSolver.solve()
+            N -= W1
+            N /= dt
         # propagate X back
         with PETSc.Log.Event("backward integration"):
             if positive:
