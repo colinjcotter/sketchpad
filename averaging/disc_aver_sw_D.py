@@ -634,8 +634,7 @@ def average(V, dVdt, positive=True, t=None):
         with PETSc.Log.Event("nonlinearity"):
             w_k.assign(weights[step])
             NSolver.solve()
-            N -= W1
-            N /= dt
+            N.assign((N - W1)/dt)
         # propagate X back
         with PETSc.Log.Event("backward integration"):
             if positive:
