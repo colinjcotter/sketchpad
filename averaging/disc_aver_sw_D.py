@@ -246,6 +246,8 @@ monoparameters_ns = {
 }
 
 monoparameters_N = {
+    "snes_lag_preconditioner": 5,
+    "snes_ksp_ew": None,
     #"snes_monitor": None,
     "mat_type": "matfree",
     "ksp_type": "gmres",
