@@ -26,6 +26,7 @@ parser.add_argument('--mass_check', action='store_true', help='Check mass conser
 parser.add_argument('--linear', action='store_true', help='Just solve the linearpropagator at each step (as if N=0).')
 parser.add_argument('--linear_velocity', action='store_true', help='Drop the velocity advection from N.')
 parser.add_argument('--linear_height', action='store_true', help='Drop the height advection from N.')
+parser.add_argument('--theta', type=float, default=0, help='Implicit timestepping coefficient to compute stable N. (default 0, 1 for averaged backward Euler).')
 
 args = parser.parse_known_args()
 args = args[0]
@@ -44,6 +45,7 @@ dts = alpha*dt/args.ns
 dt_s = Constant(dts)
 ns = args.ns
 nt = args.nt
+theta = args.theta
 
 if args.check:
     eigs = [0.003465, 0.007274, 0.014955] #maximum frequency for ref 3-5
@@ -243,6 +245,31 @@ monoparameters_ns = {
     #"patch_sub_pc_factor_shift_type": "nonzero",
 }
 
+monoparameters_N = {
+    #"snes_monitor": None,
+    "mat_type": "matfree",
+    "ksp_type": "gmres",
+    #'ksp_monitor': None,
+    #"ksp_monitor_true_residual": None,
+    #"ksp_converged_reason": None,
+    "ksp_atol": 1e-8,
+    "ksp_rtol": 1e-8,
+    "ksp_max_it": 40,
+    "pc_type": "python",
+    "pc_python_type": "firedrake.PatchPC",
+    "patch_pc_patch_save_operators": True,
+    "patch_pc_patch_partition_of_unity": True,
+    "patch_pc_patch_sub_mat_type": "seqdense",
+    "patch_pc_patch_construct_dim": 0,
+    "patch_pc_patch_construct_type": "star",
+    "patch_pc_patch_local_type": "additive",
+    "patch_pc_patch_precompute_element_tensors": True,
+    "patch_pc_patch_symmetrise_sweep": False,
+    "patch_sub_ksp_type": "preonly",
+    "patch_sub_pc_type": "lu",
+    #"patch_sub_pc_factor_shift_type": "nonzero",
+}
+
 monoparameters_nt = {
     #"snes_monitor": None,
     "snes_lag_preconditioner": nt,
@@ -406,33 +433,36 @@ K = 0.5*inner(u1, u1)
 uup = 0.5 * (dot(u1, n) + abs(dot(u1, n)))
 
 N = Function(W)
-nu, nD = TrialFunctions(W)
+nu, nD = split(N)
 
 vector_invariant = args.vector_invariant
 # Sign confusions! We are solving for nu, nD, but
 # equation is written in the form (nu, nD) - N(u1, D1) = 0.
-L = inner(nu, v)*dx + nD*phi*dx
+L = inner(nu - u1, v)*dx + (nD - D1)*phi*dx
 # Hack to unify code when no nonlinearity
 Zero = Function(V2).assign(0.)
 L += phi*Zero*dx
 if not args.eta:
     L -= div(v)*g*b*dx
 
+utheta = (1-theta)*u1 + theta*nu
+Dtheta = (1-theta)*D1 + theta*nD
+    
 if not args.linear_velocity:
     if vector_invariant:
         L -= (
-            + inner(perp(grad(inner(v, perp(u1)))), u1)*dx
-            - inner(both(perp(n)*inner(v, perp(u1))),
-                    both(Upwind*u1))*dS
+            + inner(perp(grad(inner(v, perp(utheta)))), utheta)*dx
+            - inner(both(perp(n)*inner(v, perp(utheta))),
+                    both(Upwind*utheta))*dS
             + div(v)*K*dx
         )
     else:
-        L += advection(u1, u1, v, vector=True)
+        L += advection(utheta, utheta, v, vector=True)
 if not args.linear_height:
     if args.eta:
-        L += advection(D1, u1, phi, continuity=True, vector=False)
+        L += advection(Dtheta, utheta, phi, continuity=True, vector=False)
     else:
-        L += advection(D1-H, u1, phi, continuity=True, vector=False)
+        L += advection(Dtheta-H, utheta, phi, continuity=True, vector=False)
 
 # for args.eta True we have eta_t + div(u(eta+H)) = eta_t + div(uH) + div(u*eta) [linear and nonlinear]
 # otherwise we have D_t + div(uD) = D_t + div(uH) + div(u(D-H))
@@ -444,22 +474,22 @@ if not args.linear_height:
 
 if args.advection:
     if not args.linear_velocity:
-        L -= advection(u1, ubar, v, vector=True)
+        L -= advection(utheta, ubar, v, vector=True)
     if not args.linear_height:
         if args.eta:
-            L -= advection(D1, ubar, phi, continuity=True, vector=False)
+            L -= advection(Dtheta, ubar, phi, continuity=True, vector=False)
         else:
-            L -= advection(D1, ubar, phi, continuity=True, vector=False)
+            L -= advection(Dtheta, ubar, phi, continuity=True, vector=False)
 
 #with topography, D = H + eta - b
 
-NProb = LinearVariationalProblem(lhs(L), rhs(L), N,
+NProb = NonlinearVariationalProblem(lhs(L), rhs(L), N,
                                  constant_jacobian=True)
-NSolver = LinearVariationalSolver(NProb,
-                                  solver_parameters = mparams)
+NSolver = NonlinearVariationalSolver(NProb,
+                                  solver_parameters = monoparameters_N)
 
 if args.mass_check:
-    NSolver = LinearVariationalSolver(NProb, solver_parameters = luparams)
+    NSolver = NonlinearVariationalSolver(NProb, solver_parameters = luparams)
     pcg = PCG64(seed=123456789)
     rg = RandomGenerator(pcg)
     # beta distribution
