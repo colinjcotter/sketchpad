@@ -249,8 +249,8 @@ monoparameters_ns = {
 Nparameters = {
     "snes_lag_preconditioner": 5,
     "snes_ksp_ew": None,
-    "snes_monitor": None,
-    'ksp_monitor': None,
+    #"snes_monitor": None,
+    #'ksp_monitor': None,
     "ksp_type": "gmres",
     'pc_type': 'fieldsplit',
     'fieldsplit_0_ksp_type':'preonly',
