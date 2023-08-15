@@ -27,6 +27,7 @@ parser.add_argument('--linear', action='store_true', help='Just solve the linear
 parser.add_argument('--linear_velocity', action='store_true', help='Drop the velocity advection from N.')
 parser.add_argument('--linear_height', action='store_true', help='Drop the height advection from N.')
 parser.add_argument('--theta', type=float, default=0, help='Implicit timestepping coefficient to compute stable N. (default 0, 1 for averaged backward Euler).')
+parser.add_argument('--rkstages', type=int, default=2, help='Number of RK stages, default 2. Set to 1 for backward Euler in combination with --theta 1.')
 
 args = parser.parse_known_args()
 args = args[0]
@@ -779,21 +780,27 @@ while t < tmax - 0.5*dt:
     print("RK stage 1")
     propagate(U0, U1, t=t)
     if not args.linear:
-        U1 /= 2
-        
+        if args.rkstages == 2:
+            U1 /= 2
+
         # Compute U^* = exp(dt L)[ U^n + dt*<exp(-sL)N(exp(sL)U^n)>_s]
         average(U0, Average, positive=True, t=t)
         Ustar.assign(U0 + dt*Average)
         average(U0, Average, positive=False, t=t)
         Ustar += dt*Average
         propagate(Ustar, Ustar, t=t)
-        # compute U^{n+1} = (B^n + U^*)/2 + dt*<exp(-sL)N(exp(sL)U^*)>/2
-        print("RK stage 2")
-        average(Ustar, Average, positive=True, t=t)
-        U1 += Ustar/2 + dt*Average/2
-        average(Ustar, Average, positive=False, t=t)
-        U1 += dt*Average/2
-        # start all over again
+        if args.rkstages == 2:
+            # compute U^{n+1} = (B^n + U^*)/2 + dt*<exp(-sL)N(exp(sL)U^*)>/2
+            print("RK stage 2")
+            average(Ustar, Average, positive=True, t=t)
+            U1 += Ustar/2 + dt*Average/2
+            average(Ustar, Average, positive=False, t=t)
+            U1 += dt*Average/2
+        else:
+            assert(args.rkstages == 2)
+            U1.assign(Ustar)
+            
+    # start all over again
     U0.assign(U1)
     if args.dynamic_ubar:
         projection_solver.solve()
