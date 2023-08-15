@@ -246,31 +246,24 @@ monoparameters_ns = {
     #"patch_sub_pc_factor_shift_type": "nonzero",
 }
 
-monoparameters_N = {
+Nparameters = {
     "snes_lag_preconditioner": 5,
     "snes_ksp_ew": None,
-    #"snes_monitor": None,
-    "mat_type": "matfree",
+    "snes_monitor": None,
+    'ksp_monitor': None,
     "ksp_type": "gmres",
-    #'ksp_monitor': None,
+    'pc_type': 'fieldsplit',
+    'fieldsplit_0_ksp_type':'preonly',
+    'fieldsplit_0_pc_type':'jacobi',
+    'fieldsplit_0_sub_pc_type':'ilu',
+    'fieldsplit_1_ksp_type':'preonly',
+    'fieldsplit_1_pc_type':'bjacobi',
+    'fieldsplit_1_sub_pc_type':'ilu',
     #"ksp_monitor_true_residual": None,
     #"ksp_converged_reason": None,
     "ksp_atol": 1e-8,
     "ksp_rtol": 1e-8,
     "ksp_max_it": 40,
-    "pc_type": "python",
-    "pc_python_type": "firedrake.PatchPC",
-    "patch_pc_patch_save_operators": True,
-    "patch_pc_patch_partition_of_unity": True,
-    "patch_pc_patch_sub_mat_type": "seqdense",
-    "patch_pc_patch_construct_dim": 0,
-    "patch_pc_patch_construct_type": "star",
-    "patch_pc_patch_local_type": "additive",
-    "patch_pc_patch_precompute_element_tensors": True,
-    "patch_pc_patch_symmetrise_sweep": False,
-    "patch_sub_ksp_type": "preonly",
-    "patch_sub_pc_type": "lu",
-    #"patch_sub_pc_factor_shift_type": "nonzero",
 }
 
 monoparameters_nt = {
@@ -488,7 +481,7 @@ if args.advection:
 
 NProb = NonlinearVariationalProblem(L, N)
 NSolver = NonlinearVariationalSolver(NProb,
-                                  solver_parameters = monoparameters_N)
+                                  solver_parameters = Nparameters)
 
 if args.mass_check:
     NSolver = NonlinearVariationalSolver(NProb, solver_parameters = luparams)
