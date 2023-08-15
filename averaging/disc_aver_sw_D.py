@@ -797,7 +797,7 @@ while t < tmax - 0.5*dt:
             average(Ustar, Average, positive=False, t=t)
             U1 += dt*Average/2
         else:
-            assert(args.rkstages == 2)
+            assert(args.rkstages == 1)
             U1.assign(Ustar)
             
     # start all over again
