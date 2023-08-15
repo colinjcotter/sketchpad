@@ -783,13 +783,16 @@ while t < tmax - 0.5*dt:
         if args.rkstages == 2:
             U1 /= 2
 
+        U0.assign(theta*U1 + (1-theta)*U0)
+
         # Compute U^* = exp(dt L)[ U^n + dt*<exp(-sL)N(exp(sL)U^n)>_s]
         average(U0, Average, positive=True, t=t)
         Ustar.assign(U0 + dt*Average)
         average(U0, Average, positive=False, t=t)
         Ustar += dt*Average
-        propagate(Ustar, Ustar, t=t)
+
         if args.rkstages == 2:
+            propagate(Ustar, Ustar, t=t)
             # compute U^{n+1} = (B^n + U^*)/2 + dt*<exp(-sL)N(exp(sL)U^*)>/2
             print("RK stage 2")
             average(Ustar, Average, positive=True, t=t)
