@@ -11,7 +11,8 @@ parser = argparse.ArgumentParser(description='Williamson 5 testcase for averaged
 parser.add_argument('--ref_level', type=int, default=3, help='Refinement level of icosahedral grid. Default 3.')
 parser.add_argument('--tmax', type=float, default=360, help='Final time in hours. Default 24x15=360.')
 parser.add_argument('--dumpt', type=float, default=6, help='Dump time in hours. Default 6.')
-parser.add_argument('--dt', type=float, default=0.25, help='Timestep in hours. Default 3.')
+parser.add_argument('--checkt', type=float, default=6, help='Create checkpointing file every checkt hours. Default 6.')
+parser.add_argument('--dt', type=float, default=1, help='Timestep in hours. Default 3.')
 parser.add_argument('--ns', type=int, default=5, help='Number of s steps in exponential approximation for average')
 parser.add_argument('--nt', type=int, default=4, help='Number of t steps in exponential approximation for time propagator')
 parser.add_argument('--alpha', type=float, default=2, help='Averaging window width as a multiple of dt. Default 1.')
@@ -26,7 +27,9 @@ parser.add_argument('--mass_check', action='store_true', help='Check mass conser
 parser.add_argument('--linear', action='store_true', help='Just solve the linearpropagator at each step (as if N=0).')
 parser.add_argument('--linear_velocity', action='store_true', help='Drop the velocity advection from N.')
 parser.add_argument('--linear_height', action='store_true', help='Drop the height advection from N.')
-parser.add_argument('--timestepping', type=str, default='heuns', choices=['rk4', 'heuns'], help='Choose a time steeping method. Default heuns.')
+parser.add_argument('--timestepping', type=str, default='rk4', choices=['rk4', 'heuns'], help='Choose a time steeping method. Default heuns.')
+parser.add_argument('--pickup', action='store_true', help='Pickup the result from the checkpoint.')
+parser.add_argument('--pickup_from', type=str, default='w2')
 
 args = parser.parse_known_args()
 args = args[0]
@@ -651,15 +654,37 @@ t = 0.
 tmax = 60.*60.*args.tmax
 #tmax = dt
 dumpt = args.dumpt*60.*60.
+checkt = args.checkt*60.*60.
 tdump = 0.
+tcheck = 0.
 
 x = SpatialCoordinate(mesh)
 
+# Topography
+rl = pi/9.0
+lambda_x = atan_2(x[1]/R0, x[0]/R0)
+lambda_c = -pi/2.0
+phi_x = asin(x[2]/R0)
+phi_c = pi/6.0
+minarg = min_value(pow(rl, 2), pow(phi_x - phi_c, 2) + pow(lambda_x - lambda_c, 2))
+bexpr = 2000.0*(1 - sqrt(minarg)/rl)
+b.interpolate(bexpr)
+
+# set u_expr, eta_expr
 u_0 = 20.0  # maximum amplitude of the zonal wind [m/s]
 u_max = Constant(u_0)
 u_expr = as_vector([-u_max*x[1]/R0, u_max*x[0]/R0, 0.0])
 eta_expr = - ((R0 * Omega * u_max + u_max*u_max/2.0)*(x[2]*x[2]/(R0*R0)))/g
+
+# set un, etan, Dn
 un = Function(V1, name="Velocity").project(u_expr)
+etan = Function(V2, name="Elevation").interpolate(eta_expr)
+if args.eta:
+    Dn = Function(V2, name="Elevation").interpolate(eta_expr)
+else:
+    Dn = Function(V2, name="Depth").interpolate(eta_expr + H - b)
+
+# set ubar
 if args.advection:
     # projection solve removes divergent parts
     u, p = TrialFunctions(W)
@@ -678,30 +703,40 @@ if args.advection:
     u, _ = Uproj.subfunctions
     ubar.assign(un + u)
 
-# Topography
-rl = pi/9.0
-lambda_x = atan_2(x[1]/R0, x[0]/R0)
-lambda_c = -pi/2.0
-phi_x = asin(x[2]/R0)
-phi_c = pi/6.0
-minarg = min_value(pow(rl, 2), pow(phi_x - phi_c, 2) + pow(lambda_x - lambda_c, 2))
-bexpr = 2000.0*(1 - sqrt(minarg)/rl)
-b.interpolate(bexpr)
-if args.eta:
-    Dn = Function(V2, name="Elevation").interpolate(eta_expr)
-else:
-    Dn = Function(V2, name="Depth").interpolate(eta_expr + H - b)
+#pickup the result
+if args.pickup:
+    chkfile = DumbCheckpoint(args.pickup_from, mode=FILE_READ)
+    chkfile.load(un)
+    chkfile.load(etan)
+    t = chkfile.read_attribute("/", "time")
+    tdump = chkfile.read_attribute("/", "tdump")
+    tcheck = chkfile.read_attribute("/", "tcheck")
+    chkfile.close()
+    if args.eta:
+        Dn.assign(etan)
+    else:
+        Dn.assign(etan+H0-b)
+    if args.dynamic_ubar:
+        projection_solver.solve()
+        u, _ = Uproj.subfunctions
+        ubar.assign(un + u)
 
-etan = Function(V2, name="Elevation")
-
+# write out initial fields
 name = args.filename
-file_sw = File(name+'.pvd')
-if args.eta:
-    etan.assign(Dn)
-else:
-    etan.assign(Dn-H0+b)
-file_sw.write(un, etan, b)
+file_sw = File(name+'.pvd', mode="a")
+if not args.pickup:
+    file_sw.write(un, etan, b)
 
+# calculate norms for debug
+uini = Function(V1, name="Velocity0").project(u_expr)
+etaini = Function(V2, name="Elevation0").interpolate(eta_expr)
+etanorm = errornorm(etan, etaini)/norm(etaini)
+unorm = errornorm(un, uini, norm_type="Hdiv")/norm(uini, norm_type="Hdiv")
+print('etanorm', etanorm, 'unorm', unorm)
+
+##############################################################################
+# Time loop
+##############################################################################
 U0 = Function(W)
 U1 = Function(W)
 U2 = Function(W)
@@ -725,11 +760,13 @@ if args.mass_check:
     tmax = -666.
     t = 0.
 
+#start time loop
 print ('tmax', tmax, 'dt', dt)
 while t < tmax - 0.5*dt:
     print(t)
     t += dt
     tdump += dt
+    tcheck += dt
 
     if timestepping == 'heuns':
         # V_t = <exp(-(t+s)L)N(exp((t+s)L)V)>_s
@@ -834,3 +871,29 @@ while t < tmax - 0.5*dt:
             etan.assign(Dn-H0+b)
         file_sw.write(un, etan, b)
         tdump -= dumpt
+
+    #create checkpointing file every tcheck hours
+    if tcheck > checkt - dt*0.5:
+        un.assign(U_u)
+        Dn.assign(U_D)
+        if args.eta:
+            etan.assign(Dn)
+        else:
+            etan.assign(Dn-H0+b)
+        thours = int(t/3600)
+        chk = DumbCheckpoint(name+"_"+str(thours)+"h", mode=FILE_CREATE)
+        tcheck -= checkt
+        chk.store(un)
+        chk.store(etan)
+        chk.write_attribute("/", "time", t)
+        chk.write_attribute("/", "tdump", tdump)
+        chk.write_attribute("/", "tcheck", tcheck)
+        chk.close()
+        print("checkpointed at t =", t)
+
+        #calculate norms for debug
+        etanorm = errornorm(etan, etaini)/norm(etaini)
+        unorm = errornorm(un, uini, norm_type="Hdiv")/norm(uini, norm_type="Hdiv")
+        print('etanorm', etanorm, 'unorm', unorm)
+
+print("Completed calculation at t = ", t/3600, "hours")
