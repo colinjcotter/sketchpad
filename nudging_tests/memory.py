@@ -10,10 +10,10 @@ f = Function(V)
 
 x, y = SpatialCoordinate(mesh)
 
-f.assign(cos(2*pi*x)*sin(2*pi*y))
+f.interpolate(cos(2*pi*x)*sin(2*pi*y))
 v = TestFunction(V)
 q = Function(V)
-L = inner(grad(v), grad(u - q))*(1 + (u-q)**2)*dx - f
+L = inner(grad(v), grad(u - q))*dx - f*v*dx
 
 prob = NonlinearVariationalProblem(L, u)
 solver = NonlinearVariationalSolver(prob, solver_parameters=
@@ -28,3 +28,6 @@ pyadjoint.tape.pause_annotation()
 
 for i in range(1000):
     f.assign(f*1.1)
+    Jhat([q, f])
+    Xopt= minimize(Jhat)
+    print(i, Jhat(Xopt), norm(f), norm(Xopt[1]), norm(Xopt[0]))
