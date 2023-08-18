@@ -16,12 +16,14 @@ xpoints = 40
 model = Camsholm(100, nsteps, xpoints, lambdas=True)
 MALA = True
 verbose = True
-nudging = True
-jtfilter = jittertemp_filter(n_jitt = 4, delta = 0.1,
+nudging = False
+visualise_tape = False
+jtfilter = jittertemp_filter(n_jitt = 10, delta = 0.01,
                              verbose=verbose, MALA=MALA,
-                             nudging=True, visualise_tape=True)
+                             nudging=nudging,
+                             visualise_tape=visualise_tape)
 
-nensemble = [5,5,5,5]
+nensemble = [10]*10
 jtfilter.setup(nensemble, model)
 
 x, = SpatialCoordinate(model.mesh) 
