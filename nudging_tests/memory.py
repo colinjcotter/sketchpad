@@ -23,5 +23,8 @@ solver = NonlinearVariationalSolver(prob, solver_parameters=
 pyadjoint.tape.continue_annotation()
 solver.solve()
 J = assemble(u*u*dx)
-Jhat = ReducedFunctional(J, [Control(q), Control(f)])
+Jhat = ReducedFunctional(J, [Control(q), Control(f)], derivative_components=[0])
 pyadjoint.tape.pause_annotation()
+
+for i in range(1000):
+    f.assign(f*1.1)
