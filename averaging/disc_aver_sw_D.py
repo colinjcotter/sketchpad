@@ -46,7 +46,6 @@ dts = alpha*dt/args.ns
 dt_s = Constant(dts)
 ns = args.ns
 nt = args.nt
-theta = args.theta
 
 if args.check:
     eigs = [0.003465, 0.007274, 0.014955] #maximum frequency for ref 3-5
@@ -423,10 +422,6 @@ if args.mass_check:
 # Set up the nonlinear operator W -> N(W)
 gradperp = lambda f: perp(grad(f))
 n = FacetNormal(mesh)
-Upwind = 0.5 * (sign(dot(u1, n)) + 1)
-both = lambda u: 2*avg(u)
-K = 0.5*inner(u1, u1)
-uup = 0.5 * (dot(u1, n) + abs(dot(u1, n)))
 
 N = Function(W)
 nu, nD = split(N)
@@ -440,10 +435,15 @@ Zero = Function(V2).assign(0.)
 L += phi*Zero*dx
 if not args.eta:
     L -= div(v)*g*b*dx
-
+theta = args.theta
 utheta = (1-theta)*u1 + theta*nu
 Dtheta = (1-theta)*D1 + theta*nD
-    
+
+Upwind = 0.5 * (sign(dot(utheta, n)) + 1)
+both = lambda u: 2*avg(u)
+K = 0.5*inner(utheta, utheta)
+uup = 0.5 * (dot(utheta, n) + abs(dot(utheta, n)))
+
 if not args.linear_velocity:
     if vector_invariant:
         L -= (
