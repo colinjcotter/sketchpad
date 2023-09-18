@@ -444,21 +444,23 @@ both = lambda u: 2*avg(u)
 K = 0.5*inner(utheta, utheta)
 uup = 0.5 * (dot(utheta, n) + abs(dot(utheta, n)))
 
+Dt = Constant(dt)
+
 if not args.linear_velocity:
     if vector_invariant:
-        L -= (
+        L -= Dt*(
             + inner(perp(grad(inner(v, perp(utheta)))), utheta)*dx
             - inner(both(perp(n)*inner(v, perp(utheta))),
                     both(Upwind*utheta))*dS
             + div(v)*K*dx
         )
     else:
-        L += advection(utheta, utheta, v, vector=True)
+        L += Dt*advection(utheta, utheta, v, vector=True)
 if not args.linear_height:
     if args.eta:
-        L += advection(Dtheta, utheta, phi, continuity=True, vector=False)
+        L += Dt*advection(Dtheta, utheta, phi, continuity=True, vector=False)
     else:
-        L += advection(Dtheta-H, utheta, phi, continuity=True, vector=False)
+        L += Dt*advection(Dtheta-H, utheta, phi, continuity=True, vector=False)
 
 # for args.eta True we have eta_t + div(u(eta+H)) = eta_t + div(uH) + div(u*eta) [linear and nonlinear]
 # otherwise we have D_t + div(uD) = D_t + div(uH) + div(u(D-H))
@@ -470,12 +472,12 @@ if not args.linear_height:
 
 if args.advection:
     if not args.linear_velocity:
-        L -= advection(utheta, ubar, v, vector=True)
+        L -= Dt*advection(utheta, ubar, v, vector=True)
     if not args.linear_height:
         if args.eta:
-            L -= advection(Dtheta, ubar, phi, continuity=True, vector=False)
+            L -= Dt*advection(Dtheta, ubar, phi, continuity=True, vector=False)
         else:
-            L -= advection(Dtheta, ubar, phi, continuity=True, vector=False)
+            L -= Dt*advection(Dtheta, ubar, phi, continuity=True, vector=False)
 
 #with topography, D = H + eta - b
 
