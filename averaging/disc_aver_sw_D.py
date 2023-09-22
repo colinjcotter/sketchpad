@@ -246,8 +246,8 @@ monoparameters_ns = {
 }
 
 Nparameters = {
-    "snes_monitor": None,
-    'ksp_monitor': None,
+    #"snes_monitor": None,
+    #'ksp_monitor': None,
     "ksp_type": "preonly",
     'pc_type': 'fieldsplit',
     'pc_fieldsplit_type': 'multiplicative',
