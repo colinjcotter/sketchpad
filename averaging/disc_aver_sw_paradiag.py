@@ -10,12 +10,12 @@ print = PETSc.Sys.Print
 import argparse
 parser = argparse.ArgumentParser(description='Williamson 5 testcase for averaged propagator using D (thickness) as the pressure variable.')
 parser.add_argument('--ref_level', type=int, default=3, help='Refinement level of icosahedral grid. Default 3.')
-parser.add_argument('--tmax', type=float, default=0.25, help='Final time in hours. Default 24x15=360.')
-parser.add_argument('--dumpt', type=float, default=0.25, help='Dump time in hours. Default 6.')
-parser.add_argument('--checkt', type=float, default=0.25, help='Create checkpointing file every checkt hours. Default 6.')
-parser.add_argument('--dt', type=float, default=0.25, help='Timestep in hours. Default 3.')
-parser.add_argument('--ns', type=int, default=2, help='Number of s steps in exponential approximation for average')
-parser.add_argument('--nt', type=int, default=2, help='Number of t steps in exponential approximation for time propagator')
+parser.add_argument('--tmax', type=float, default=1, help='Final time in hours. Default 24x15=360.')
+parser.add_argument('--dumpt', type=float, default=1, help='Dump time in hours. Default 6.')
+parser.add_argument('--checkt', type=float, default=1, help='Create checkpointing file every checkt hours. Default 6.')
+parser.add_argument('--dt', type=float, default=1, help='Timestep in hours. Default 3.')
+parser.add_argument('--ns', type=int, default=8, help='Number of s steps in exponential approximation for average')
+parser.add_argument('--nt', type=int, default=8, help='Number of t steps in exponential approximation for time propagator')
 parser.add_argument('--alpha', type=float, default=1, help='Averaging window width as a multiple of dt. Default 1.')
 parser.add_argument('--filename', type=str, default='w2', help='filename for pvd')
 parser.add_argument('--check', action="store_true", help='print out some information about frequency resolution and exit')
@@ -31,7 +31,7 @@ parser.add_argument('--linear_height', action='store_true', help='Drop the heigh
 parser.add_argument('--timestepping', type=str, default='rk4', choices=['rk4', 'heuns'], help='Choose a time steeping method. Default heuns.')
 parser.add_argument('--pickup', action='store_true', help='Pickup the result from the checkpoint.')
 parser.add_argument('--pickup_from', type=str, default='w2')
-parser.add_argument('--nslices', type=int, default=1, help='Number of time-slices per time-window.')
+parser.add_argument('--nslices', type=int, default=4, help='Number of time-slices per time-window.')
 parser.add_argument('--slice_length', type=int, default=2, help='Number of timesteps per time-slice.')
 parser.add_argument('--alphap', type=float, default=0.0001, help='Circulant coefficient.')
 
@@ -214,7 +214,7 @@ H0 = Constant(5960.)
 
 mesh_degree = 3
 mesh = IcosahedralSphereMesh(radius=R0,
-                             refinement_level=ref_level, degree=mesh_degree)
+                             refinement_level=ref_level, degree=mesh_degree, comm=ensemble.comm)
 cx = SpatialCoordinate(mesh)
 mesh.init_cell_orientations(cx)
 
@@ -339,10 +339,6 @@ if args.advection:
     F0m += dt_ss*advection(uh, ubar, v, vector=True)
     F0m += dt_ss*advection(Dh, ubar, phi, continuity=True, vector=False)
 
-
-#if args.advection:
-#    params = monoparameters_ns
-#else:
 params = hparams
 
 # Set up the forward scatter
@@ -538,14 +534,12 @@ def form_function(u, D, v, phi, t):
 def form_mass(uu, up, vu, vp):
     return (inner(uu, vu) + up * vp) * dx
 
-theta = 0.5
+theta = Constant(0.5)
 propagate_form = asQ.AllAtOnceForm(Wall, dt/nt, theta,
                                    form_mass, form_function)
 
 propagate_solver = asQ.AllAtOnceSolver(propagate_form, Wall,
                                        solver_parameters=solver_parameters_diag)
-
-
 
 propagate_form = asQ.AllAtOnceForm(Wall, 0.5*dt/nt, theta,
                                    form_mass, form_function)
@@ -553,35 +547,6 @@ propagate_form = asQ.AllAtOnceForm(Wall, 0.5*dt/nt, theta,
 propagate_solver_half = asQ.AllAtOnceSolver(propagate_form, Wall,
                                        solver_parameters=solver_parameters_diag)
 
-
-
-
-# if args.mass_check:
-#     forwardp_expsolver_dt = LinearVariationalSolver(forwardp_expProb_dt,
-#                                                     solver_parameters=luparams)
-#     pcg = PCG64(seed=123456789)
-#     rg = RandomGenerator(pcg)
-#     # beta distribution
-#     f_rand = rg.normal(W, 0.0, 1.0)
-#     W0.assign(f_rand)
-#     W1.assign(f_rand)
-#     forwardp_expsolver_dt.solve()
-#     _, Dcheck0 = split(W0)
-#     _, Dcheck1 = split(W1)
-#     print("F1p mass check dt", assemble((Dcheck0-Dcheck1)*dx)/Area)
-
-
-
-
-
-
-
-
-
-
-
-
-    
 # Set up the backward gather
 X0 = Function(W)
 X1 = Function(W)
@@ -736,7 +701,8 @@ def average(V, dVdt, positive=True, t=None):
             W1.assign(W0)
     # copy contents
     dVdt.assign(X0)
-    
+
+
 # Function to apply forward propagation in t
 def propagate(V_in, V_out, t=None, half=False):
     Wall.assign(V_in)
@@ -868,43 +834,10 @@ while t < tmax - 0.5*dt:
     tcheck += dt
 
     if timestepping == 'heuns':
-        # V_t = <exp(-(t+s)L)N(exp((t+s)L)V)>_s
-    
-        # V^* = V^n + dt*f(V^n)
-        # V^{n+1} = V^n + dt*f((V^n + V^*)/2)
-
-        # V = exp(-tL)U
-        # U = exp(tL)V
-
-        # STEP 1
-        # t is time at start of timestep
-        # exp(-(t+dt)L)U^* = exp(-tL)U^n + dt*<exp(-(t+s)L)N(
-        #                                         exp((t+s)L)V^n)>_s
-        # exp(-(t+dt)L)U^* = exp(-tL)U^n + dt*<exp(-(t+s)L)N(exp(sL)U^n)>_s
-        # so
-        # U^* = exp(dt L)[ U^n + dt*<exp(-sL)N(exp(sL)U^n)>_s]
-
-        # STEP 2
-        # exp(-(t+dt)L)U^{n+1} = exp(-tL)U^n + dt*<
-        #                  exp(-(t+s)L)N(exp((t+s)L)V^n)/2
-        #                +exp(-(t+dt+s)L)N(exp((t+dt+s)L)V^*)/2>
-        # so
-        # exp(-(t+dt)L)U^{n+1} = exp(-tL)U^n + dt*<
-        #                  exp(-(t+s)L)N(exp(sL)U^n)/2
-        #                +exp(-(t+dt+s)L)N(exp(sL)U^*)/2>
-        # s0
-        # U^{n+1} = exp(dt L)[U^n + dt*<
-        #                  exp(-sL)N(exp(sL)U^n)>/2]
-        #                +dt*<exp(-sL)N(exp(sL)U^*)>/2
-        #         = exp(dt L)U^n/2 + U^*/2 + dt*<exp(-sL)N(exp(sL)U^*)>/2
-
-        # steps are then
-        # Compute B^n = exp(dt L)U^n
         print("RK stage 1")
         propagate(U0, U1, t=t)
         if not args.linear:
             U1 /= 2
-        
             # Compute U^* = exp(dt L)[ U^n + dt*<exp(-sL)N(exp(sL)U^n)>_s]
             average(U0, Average, positive=True, t=t)
             Ustar.assign(U0 + dt*Average)
@@ -919,6 +852,7 @@ while t < tmax - 0.5*dt:
             U1 += dt*Average/2
         # start all over again
         U0.assign(U1)
+
     elif timestepping == 'rk4':
         print("RK stage 1")
         average(U0, Average, positive=True, t=t)
