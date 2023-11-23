@@ -33,6 +33,10 @@ parser.add_argument('--pickup_from', type=str, default='w2')
 parser.add_argument('--nslices', type=int, default=2, help='Number of time-slices per time-window.')
 parser.add_argument('--alphap', type=float, default=0.0001, help='Circulant coefficient.')
 
+paradiag_dt = True
+paradiag_fs = True
+paradiag_n = True
+
 args = parser.parse_known_args()
 args = args[0]
 timestepping = args.timestepping
@@ -241,6 +245,7 @@ else:
 #Set up the forward and backwards scatter discrete exponential operator
 Wall = asQ.AllAtOnceFunction(ensemble, time_partition, W)
 Walls = asQ.AllAtOnceFunction(ensemble, time_partition, W)
+Nall = asQ.AllAtOnceFunction(ensemble, time_partition, W)
 W0 = Function(W)
 W1 = Function(W)
 u0, D0 = split(W0)
@@ -402,7 +407,7 @@ forwardp_expProb_dt = LinearVariationalProblem(lhs(F1p), rhs(F1p), W1,
 forwardp_expsolver_dt = LinearVariationalSolver(forwardp_expProb_dt,
                                                 solver_parameters=params)
 
-paradiag_dt = True
+
 if paradiag_dt:
     ### === --- Set up the forward solver for dt propagation --- === ###
     def form_function(u, D, v, phi, t):
@@ -427,7 +432,7 @@ if paradiag_dt:
     propagate_solver_half = asQ.AllAtOnceSolver(propagate_form, Wall,
                                                 solver_parameters=solver_parameters_diag)
 
-paradiag_fs = True
+
 if paradiag_fs:
     forwardp_exp_form = asQ.AllAtOnceForm(Walls, dt/ns, theta,
                                           form_mass, form_function)
@@ -708,13 +713,26 @@ def average(V, dVdt, positive=True, t=None):
                 else:
                     forwardm_expsolver.solve()
             W0.assign(W1)
+
+    if paradiag_n:
+        for step in range(time_partition_s[ensemble.ensemble_rank]):
+            W1.assign(Walls[step])
+            step_W = Walls.transform_index(step, from_range='slice', to_range='window')
+            w_k.assign(weights[step_W])
+            NSolver.solve()
+            Nall[step].assign(N)
+
     # backwards gather
     X1.assign(0.)
     for step in ProgressBar(f'average backward').iter(range(ns, -1, -1)):
-        # compute N
-        with PETSc.Log.Event("nonlinearity"):
-            w_k.assign(weights[step])
-            NSolver.solve()
+        if paradiag_n:
+            Nall.bcast_field(step, N)
+        else:
+            # compute N
+            with PETSc.Log.Event("nonlinearity"):
+                w_k.assign(weights[step])
+                NSolver.solve()
+
         # propagate X back
         with PETSc.Log.Event("backward integration"):
             if positive:
@@ -722,14 +740,15 @@ def average(V, dVdt, positive=True, t=None):
             else:
                 Xmsolver.solve()
         X1.assign(X0)
+        if not paradiag_n:
         # back propagate W
-        if step > 0:
-            with PETSc.Log.Event("backward propagation ds"):
-                if positive:
-                    backwardp_expsolver.solve()
-                else:
-                    backwardm_expsolver.solve()
-            W1.assign(W0)
+            if step > 0:
+                with PETSc.Log.Event("backward propagation ds"):
+                    if positive:
+                        backwardp_expsolver.solve()
+                    else:
+                        backwardm_expsolver.solve()
+                W1.assign(W0)
     # copy contents
     dVdt.assign(X0)
 
@@ -758,7 +777,6 @@ def propagate(V_in, V_out, t=None, half=False):
 
 t = 0.
 tmax = 60.*60.*args.tmax
-#tmax = dt
 dumpt = args.dumpt*60.*60.
 checkt = args.checkt*60.*60.
 tdump = 0.
