@@ -30,7 +30,7 @@ parser.add_argument('--linear_height', action='store_true', help='Drop the heigh
 parser.add_argument('--timestepping', type=str, default='rk4', choices=['rk4', 'heuns'], help='Choose a time steeping method. Default heuns.')
 parser.add_argument('--pickup', action='store_true', help='Pickup the result from the checkpoint.')
 parser.add_argument('--pickup_from', type=str, default='w2')
-parser.add_argument('--nslices', type=int, default=2, help='Number of time-slices per time-window.')
+parser.add_argument('--nslices', type=int, default=1, help='Number of time-slices per time-window.')
 parser.add_argument('--alphap', type=float, default=0.0001, help='Circulant coefficient.')
 
 paradiag_dt = True
@@ -714,20 +714,23 @@ def average(V, dVdt, positive=True, t=None):
                     forwardm_expsolver.solve()
             W0.assign(W1)
 
+    # backwards gather
     if paradiag_n:
-        for step in range(time_partition_s[ensemble.ensemble_rank]):
+        for step in range(time_partition_s[ensemble.ensemble_comm.rank]):
+#        for step in range(slice_length_s):
             W1.assign(Walls[step])
             step_W = Walls.transform_index(step, from_range='slice', to_range='window')
             w_k.assign(weights[step_W])
             NSolver.solve()
             Nall[step].assign(N)
 
-    # backwards gather
+    if paradiag_n:
+        for step in range(time_partition_s[ensemble.ensemble_comm.rank]):
+            Nall.bcast_field(step, N)
+
     X1.assign(0.)
     for step in ProgressBar(f'average backward').iter(range(ns, -1, -1)):
-        if paradiag_n:
-            Nall.bcast_field(step, N)
-        else:
+        if not paradiag_n:
             # compute N
             with PETSc.Log.Event("nonlinearity"):
                 w_k.assign(weights[step])
