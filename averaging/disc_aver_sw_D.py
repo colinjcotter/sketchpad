@@ -615,7 +615,7 @@ def average(V, dVdt, positive=True, t=None):
         W0.assign(W1)
     # backwards gather
     X1.assign(0.)
-    for step in ProgressBar(f'average backward').iter(range(ns, -1, -1)):
+    for step in ProgressBar(f'average backward').iter(range(ns, 0, -1)):
         # compute N
         with PETSc.Log.Event("nonlinearity"):
             w_k.assign(weights[step])
@@ -662,7 +662,7 @@ x = SpatialCoordinate(mesh)
 
 # Topography
 rl = pi/9.0
-lambda_x = atan_2(x[1]/R0, x[0]/R0)
+lambda_x = atan2(x[1]/R0, x[0]/R0)
 lambda_c = -pi/2.0
 phi_x = asin(x[2]/R0)
 phi_c = pi/6.0
