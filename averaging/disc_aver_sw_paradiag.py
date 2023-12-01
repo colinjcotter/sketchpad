@@ -9,10 +9,10 @@ print = PETSc.Sys.Print
 import argparse
 parser = argparse.ArgumentParser(description='Williamson 5 testcase for averaged propagator using D (thickness) as the pressure variable.')
 parser.add_argument('--ref_level', type=int, default=3, help='Refinement level of icosahedral grid. Default 3.')
-parser.add_argument('--tmax', type=float, default=0.25, help='Final time in hours. Default 24x15=360.')
-parser.add_argument('--dumpt', type=float, default=0.25, help='Dump time in hours. Default 6.')
-parser.add_argument('--checkt', type=float, default=0.25, help='Create checkpointing file every checkt hours. Default 6.')
-parser.add_argument('--dt', type=float, default=0.25, help='Timestep in hours. Default 3.')
+parser.add_argument('--tmax', type=float, default=1., help='Final time in hours. Default 24x15=360.')
+parser.add_argument('--dumpt', type=float, default=0.5, help='Dump time in hours. Default 6.')
+parser.add_argument('--checkt', type=float, default=0.5, help='Create checkpointing file every checkt hours. Default 6.')
+parser.add_argument('--dt', type=float, default=0.5, help='Timestep in hours. Default 3.')
 parser.add_argument('--ns', type=int, default=4, help='Number of s steps in exponential approximation for average')
 parser.add_argument('--nt', type=int, default=4, help='Number of t steps in exponential approximation for time propagator')
 parser.add_argument('--alpha', type=float, default=1, help='Averaging window width as a multiple of dt. Default 1.')
@@ -32,14 +32,19 @@ parser.add_argument('--pickup', action='store_true', help='Pickup the result fro
 parser.add_argument('--pickup_from', type=str, default='w2')
 parser.add_argument('--nslices', type=int, default=1, help='Number of time-slices per time-window.')
 parser.add_argument('--alphap', type=float, default=0.0001, help='Circulant coefficient.')
-
-paradiag_dt = True
-paradiag_fs = True
-paradiag_n = True
+parser.add_argument('--paradiag_dt', action="store_true", help='Use paradiag for propagate solve')
+parser.add_argument('--paradiag_fs', action="store_true", help='Use paradiag for forward scatter')
+parser.add_argument('--paradiag_n', action="store_true", help='Use paradiag for nonlinear operator')
 
 args = parser.parse_known_args()
 args = args[0]
 timestepping = args.timestepping
+
+# paradiag switch for debugging
+paradiag_dt = args.paradiag_dt
+paradiag_fs = args.paradiag_fs
+paradiag_n = args.paradiag_n
+
 print(args)
 
 if args.show_args:
@@ -695,7 +700,6 @@ print(weights)
 # Function to take in current state V and return dV/dt
 def average(V, dVdt, positive=True, t=None):
     # forward scatter
-    dt_s.assign(dts)
     if paradiag_fs:
         Walls.assign(V)
         with PETSc.Log.Event("forward propagation ds"):
@@ -706,6 +710,7 @@ def average(V, dVdt, positive=True, t=None):
         Walls.bcast_field(-1, W1)
     else:
         W0.assign(V)
+        dt_s.assign(dts)
         for step in ProgressBar(f'average forward').iter(range(ns)):
             with PETSc.Log.Event("forward propagation ds"):
                 if positive:
@@ -717,19 +722,14 @@ def average(V, dVdt, positive=True, t=None):
     # backwards gather
     if paradiag_n:
         for step in range(time_partition_s[ensemble.ensemble_comm.rank]):
-#        for step in range(slice_length_s):
             W1.assign(Walls[step])
             step_W = Walls.transform_index(step, from_range='slice', to_range='window')
             w_k.assign(weights[step_W])
             NSolver.solve()
             Nall[step].assign(N)
 
-    if paradiag_n:
-        for step in range(time_partition_s[ensemble.ensemble_comm.rank]):
-            Nall.bcast_field(step, N)
-
     X1.assign(0.)
-    for step in ProgressBar(f'average backward').iter(range(ns, -1, -1)):
+    for step in ProgressBar(f'average backward').iter(range(ns, 0, -1)):
         if not paradiag_n:
             # compute N
             with PETSc.Log.Event("nonlinearity"):
@@ -737,6 +737,7 @@ def average(V, dVdt, positive=True, t=None):
                 NSolver.solve()
 
         # propagate X back
+        Nall.bcast_field(step-1, N)
         with PETSc.Log.Event("backward integration"):
             if positive:
                 Xpsolver.solve()
