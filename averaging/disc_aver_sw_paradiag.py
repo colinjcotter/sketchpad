@@ -1,5 +1,6 @@
 from firedrake import *
 from firedrake.petsc import PETSc
+from pyop2.mpi import MPI
 import asQ
 
 import numpy as np
@@ -9,7 +10,7 @@ print = PETSc.Sys.Print
 import argparse
 parser = argparse.ArgumentParser(description='Williamson 5 testcase for averaged propagator using D (thickness) as the pressure variable.')
 parser.add_argument('--ref_level', type=int, default=3, help='Refinement level of icosahedral grid. Default 3.')
-parser.add_argument('--tmax', type=float, default=1., help='Final time in hours. Default 24x15=360.')
+parser.add_argument('--tmax', type=float, default=1, help='Final time in hours. Default 24x15=360.')
 parser.add_argument('--dumpt', type=float, default=0.5, help='Dump time in hours. Default 6.')
 parser.add_argument('--checkt', type=float, default=0.5, help='Create checkpointing file every checkt hours. Default 6.')
 parser.add_argument('--dt', type=float, default=0.5, help='Timestep in hours. Default 3.')
@@ -23,7 +24,6 @@ parser.add_argument('--dynamic_ubar', action="store_true", help='Use un as ubar.
 parser.add_argument('--vector_invariant', action="store_true", help='use vector invariant form.')
 parser.add_argument('--eta', action="store_true", help='use eta instead of D.')
 parser.add_argument('--show_args', action='store_true', help='Output all the arguments.')
-parser.add_argument('--mass_check', action='store_true', help='Check mass conservation in the solver.')
 parser.add_argument('--linear', action='store_true', help='Just solve the linearpropagator at each step (as if N=0).')
 parser.add_argument('--linear_velocity', action='store_true', help='Drop the velocity advection from N.')
 parser.add_argument('--linear_height', action='store_true', help='Drop the height advection from N.')
@@ -35,6 +35,7 @@ parser.add_argument('--alphap', type=float, default=0.0001, help='Circulant coef
 parser.add_argument('--paradiag_dt', action="store_true", help='Use paradiag for propagate solve')
 parser.add_argument('--paradiag_fs', action="store_true", help='Use paradiag for forward scatter')
 parser.add_argument('--paradiag_n', action="store_true", help='Use paradiag for nonlinear operator')
+parser.add_argument('--paradiag_X', action="store_true", help='Use paradiag for nonlinear operator')
 
 args = parser.parse_known_args()
 args = args[0]
@@ -44,14 +45,12 @@ timestepping = args.timestepping
 paradiag_dt = args.paradiag_dt
 paradiag_fs = args.paradiag_fs
 paradiag_n = args.paradiag_n
+paradiag_X = args.paradiag_X
 
 print(args)
 
 if args.show_args:
     PETSc.Sys.Print(args)
-
-if args.mass_check:
-    print("Conducting mass conservation checks. Uses direct solver on mixed systems so not recommended for high resolution.")
 
 
 PETSc.Sys.Print('')
@@ -71,6 +70,11 @@ nt = args.nt
 if nt % 2 == 1:
     print('nt is an odd number. exit')
     import sys; sys.exit()
+
+if paradiag_X:
+    if not paradiag_n:
+        print('pradiag_n needs to use paradiag_X. exit')
+        import sys; sys.exit()
 
 # print out ppp
 eigs = [0.003465, 0.007274, 0.014955] #maximum frequency for ref 3-5
@@ -196,18 +200,18 @@ solver_parameters_diag['diagfft_block_'+str(i)+'_'] = monoparameters_ns
 PETSc.Sys.Print('### === --- Calculating parallel solution --- === ###')
 
 # setup slice length
-slice_length = int(nt/args.nslices)
-assert(slice_length*args.nslices == nt)
+slice_length_t = int(nt/args.nslices)
+assert(slice_length_t*args.nslices == nt)
 slice_length_s = int(ns/args.nslices)
 assert(slice_length_s*args.nslices == ns)
 
 # setup time_partition
-time_partition = [slice_length for _ in range(args.nslices)]
-window_length = int(sum(time_partition))
+time_partition_t = [slice_length_t for _ in range(args.nslices)]
 time_partition_s = [slice_length_s for _ in range(args.nslices)]
 
 # setup ensemble
-ensemble = asQ.create_ensemble(time_partition)
+ensemble = asQ.create_ensemble(time_partition_t)
+ensemble_rank = ensemble.ensemble_comm.rank
 
 #some domain, parameters and FS setup
 R0 = 6371220.
@@ -247,10 +251,15 @@ if args.eta:
 else:
     H = H0
 
+#Set up all at once functions
+Wall = asQ.AllAtOnceFunction(ensemble, time_partition_t, W)
+Walls = asQ.AllAtOnceFunction(ensemble, time_partition_t, W)
+Nall = asQ.AllAtOnceFunction(ensemble, time_partition_s, W)
+Xall = asQ.AllAtOnceFunction(ensemble, time_partition_s, W)
+Xall_new = asQ.AllAtOnceFunction(ensemble, time_partition_s, W)
+RHS = asQ.AllAtOnceFunction(ensemble, time_partition_s, W)
+
 #Set up the forward and backwards scatter discrete exponential operator
-Wall = asQ.AllAtOnceFunction(ensemble, time_partition, W)
-Walls = asQ.AllAtOnceFunction(ensemble, time_partition, W)
-Nall = asQ.AllAtOnceFunction(ensemble, time_partition, W)
 W0 = Function(W)
 W1 = Function(W)
 u0, D0 = split(W0)
@@ -342,6 +351,7 @@ if args.advection:
     F0m += dt_ss*advection(uh, ubar, v, vector=True)
     F0m += dt_ss*advection(Dh, ubar, phi, continuity=True, vector=False)
 
+
 #if args.advection:
 #    params = monoparameters_ns
 #else:
@@ -352,38 +362,12 @@ forwardp_expProb = LinearVariationalProblem(lhs(F1p), rhs(F1p), W1,
                                             constant_jacobian=constant_jacobian)
 forwardp_expsolver = LinearVariationalSolver(forwardp_expProb,
                                                solver_parameters=params)
-if args.mass_check:
-    forwardp_expsolver = LinearVariationalSolver(forwardp_expProb,
-                                               solver_parameters=luparams)
-    pcg = PCG64(seed=123456789)
-    rg = RandomGenerator(pcg)
-    # beta distribution
-    f_rand = rg.normal(W, 0.0, 1.0)
-    W0.assign(f_rand)
-    W1.assign(f_rand)
-    forwardp_expsolver.solve()
-    _, Dcheck0 = split(W0)
-    _, Dcheck1 = split(W1)
-    print("F1p mass check", assemble((Dcheck0-Dcheck1)*dx)/Area)
 
 
 forwardm_expProb = LinearVariationalProblem(lhs(F1m), rhs(F1m), W1,
                                             constant_jacobian=constant_jacobian)
 forwardm_expsolver = LinearVariationalSolver(forwardm_expProb,
                                                solver_parameters=params)
-if args.mass_check:
-    forwardm_expsolver = LinearVariationalSolver(forwardm_expProb,
-                                               solver_parameters=luparams)
-    pcg = PCG64(seed=123456789)
-    rg = RandomGenerator(pcg)
-    # beta distribution
-    f_rand = rg.normal(W, 0.0, 1.0)
-    W0.assign(f_rand)
-    W1.assign(f_rand)
-    forwardm_expsolver.solve()
-    _, Dcheck0 = split(W0)
-    _, Dcheck1 = split(W1)
-    print("F1m mass check", assemble((Dcheck0-Dcheck1)*dx)/Area)
 
 # Set up the forward solver for dt propagation
 #if args.advection:
@@ -412,56 +396,42 @@ forwardp_expProb_dt = LinearVariationalProblem(lhs(F1p), rhs(F1p), W1,
 forwardp_expsolver_dt = LinearVariationalSolver(forwardp_expProb_dt,
                                                 solver_parameters=params)
 
-
-if paradiag_dt:
-    ### === --- Set up the forward solver for dt propagation --- === ###
+### === --- Set up form_function and form_mass for ParaDiag --- === ###
+def get_form_function(upwind=True):
     def form_function(u, D, v, phi, t):
         F1p = (inner(f*perp(u),v) - g*D*div(v) + div(u*H)*phi)*dx
 
         if args.advection:
-            F1p += advection(u, ubar, v, vector=True)
+            F1p += advection(u, ubar, v, vector=True, upwind=upwind)
             F1p += advection(D, ubar, phi,
-                             continuity=True, vector=False)
+                                 continuity=True, vector=False, upwind=upwind)
         return F1p
+    return form_function
 
-    def form_mass(uu, up, vu, vp):
-        return (inner(uu, vu) + up * vp) * dx
+def form_mass(uu, up, vu, vp):
+    return (inner(uu, vu) + up * vp) * dx
 
-    theta = Constant(0.5)
+theta = Constant(0.5)
+if paradiag_dt:
+    ### === --- Set up the forward solver for dt propagation --- === ###
     propagate_form = asQ.AllAtOnceForm(Wall, dt/nt, theta,
-                                       form_mass, form_function)
+                                       form_mass, get_form_function())
     propagate_solver = asQ.AllAtOnceSolver(propagate_form, Wall,
                                            solver_parameters=solver_parameters_diag)
-    propagate_form = asQ.AllAtOnceForm(Wall, 0.5*dt/nt, theta,
-                                       form_mass, form_function)
-    propagate_solver_half = asQ.AllAtOnceSolver(propagate_form, Wall,
+    propagate_form_half = asQ.AllAtOnceForm(Wall, 0.5*dt/nt, theta,
+                                            form_mass, get_form_function())
+    propagate_solver_half = asQ.AllAtOnceSolver(propagate_form_half, Wall,
                                                 solver_parameters=solver_parameters_diag)
 
-
 if paradiag_fs:
-    forwardp_exp_form = asQ.AllAtOnceForm(Walls, dt/ns, theta,
-                                          form_mass, form_function)
-    forwardp_expsolver = asQ.AllAtOnceSolver(forwardp_exp_form, Walls,
-                                             solver_parameters=solver_parameters_diag)
-    forwardm_exp_form = asQ.AllAtOnceForm(Walls, -dt/ns, theta,
-                                          form_mass, form_function)
-    forwardm_expsolver = asQ.AllAtOnceSolver(forwardm_exp_form, Walls,
-                                             solver_parameters=solver_parameters_diag)
-
-
-if args.mass_check:
-    forwardp_expsolver_dt = LinearVariationalSolver(forwardp_expProb_dt,
-                                                    solver_parameters=luparams)
-    pcg = PCG64(seed=123456789)
-    rg = RandomGenerator(pcg)
-    # beta distribution
-    f_rand = rg.normal(W, 0.0, 1.0)
-    W0.assign(f_rand)
-    W1.assign(f_rand)
-    forwardp_expsolver_dt.solve()
-    _, Dcheck0 = split(W0)
-    _, Dcheck1 = split(W1)
-    print("F1p mass check dt", assemble((Dcheck0-Dcheck1)*dx)/Area)
+    Wpform = asQ.AllAtOnceForm(Walls, alpha*dt/ns, theta,
+                               form_mass, get_form_function(upwind=True))
+    Wpsolver = asQ.AllAtOnceSolver(Wpform, Walls,
+                                   solver_parameters=solver_parameters_diag)
+    Wmform = asQ.AllAtOnceForm(Walls, -alpha*dt/ns, theta,
+                               form_mass, get_form_function(upwind=False))
+    Wmsolver = asQ.AllAtOnceSolver(Wmform, Walls,
+                                   solver_parameters=solver_parameters_diag)
 
 # Set up the backward scatter
 if args.advection:
@@ -474,37 +444,11 @@ backwardp_expProb = LinearVariationalProblem(lhs(F0p), rhs(F0p), W0,
 backwardp_expsolver = LinearVariationalSolver(backwardp_expProb,
                                                 solver_parameters=params)
 
-if args.mass_check:
-    backwardp_expsolver = LinearVariationalSolver(backwardp_expProb,
-                                                    solver_parameters=luparams)
-    pcg = PCG64(seed=123456789)
-    rg = RandomGenerator(pcg)
-    # beta distribution
-    f_rand = rg.normal(W, 0.0, 1.0)
-    W0.assign(f_rand)
-    W1.assign(f_rand)
-    backwardp_expsolver.solve()
-    _, Dcheck0 = split(W0)
-    _, Dcheck1 = split(W1)
-    print("F0p mass check", assemble((Dcheck0-Dcheck1)*dx)/Area)
 
 backwardm_expProb = LinearVariationalProblem(lhs(F0m), rhs(F0m), W0,
                                              constant_jacobian=constant_jacobian)
 backwardm_expsolver = LinearVariationalSolver(backwardm_expProb,
                                                 solver_parameters=params)
-if args.mass_check:
-    backwardm_expsolver = LinearVariationalSolver(backwardm_expProb,
-                                                    solver_parameters=luparams)
-    pcg = PCG64(seed=123456789)
-    rg = RandomGenerator(pcg)
-    # beta distribution
-    f_rand = rg.normal(W, 0.0, 1.0)
-    W0.assign(f_rand)
-    W1.assign(f_rand)
-    backwardm_expsolver.solve()
-    _, Dcheck0 = split(W0)
-    _, Dcheck1 = split(W1)
-    print("F0m mass check", assemble((Dcheck0-Dcheck1)*dx)/Area)
 
 # Set up the nonlinear operator W -> N(W)
 gradperp = lambda f: perp(grad(f))
@@ -567,16 +511,6 @@ NProb = LinearVariationalProblem(lhs(L), rhs(L), N,
 NSolver = LinearVariationalSolver(NProb,
                                   solver_parameters = mparams)
 
-if args.mass_check:
-    NSolver = LinearVariationalSolver(NProb, solver_parameters = luparams)
-    pcg = PCG64(seed=123456789)
-    rg = RandomGenerator(pcg)
-    # beta distribution
-    f_rand = rg.normal(W, 0.0, 1.0)
-    W1.assign(f_rand)
-    NSolver.solve()
-    nu, nD = split(N)
-    print("Nonlinear mass check", assemble(nD*dx)/Area)
 
 # Set up the backward gather
 X0 = Function(W)
@@ -597,7 +531,6 @@ u1, D1 = split(X1)
 
 w_k = Constant(1.0) # the weight
 u, D = TrialFunctions(W)
-
 nu, nD = split(N)
 
 theta = Constant(0.5)
@@ -621,23 +554,6 @@ XProbp = LinearVariationalProblem(lhs(Fp), rhs(Fp), X0,
                                   constant_jacobian=constant_jacobian)
 Xpsolver = LinearVariationalSolver(XProbp,
                                   solver_parameters = params)
-if args.mass_check:
-    Xpsolver = LinearVariationalSolver(XProbp,
-                                       solver_parameters=luparams)
-    pcg = PCG64(seed=123456789)
-    rg = RandomGenerator(pcg)
-    # beta distribution
-    f_rand = rg.normal(W, 0.0, 1.0)
-    W0.assign(f_rand)
-    W1.assign(f_rand)
-    X0.assign(f_rand)
-    X1.assign(f_rand)
-    NSolver.solve()
-    Xpsolver.solve()
-    _, Dcheck0 = split(X0)
-    _, Dcheck1 = split(X1)
-    print("Xp mass check", assemble((Dcheck0-Dcheck1)*dx)/Area)
-
 
 dt_ss = -dt_s
 # negative s inward propagation
@@ -655,22 +571,43 @@ XProbm = LinearVariationalProblem(lhs(Fm), rhs(Fm), X0,
 Xmsolver = LinearVariationalSolver(XProbm,
                                   solver_parameters = params)
 
-if args.mass_check:
-    Xmsolver = LinearVariationalSolver(XProbm,
-                                       solver_parameters=luparams)
-    pcg = PCG64(seed=123456789)
-    rg = RandomGenerator(pcg)
-    # beta distribution
-    f_rand = rg.normal(W, 0.0, 1.0)
-    W0.assign(f_rand)
-    W1.assign(f_rand)
-    X0.assign(f_rand)
-    X1.assign(f_rand)
-    NSolver.solve()
-    Xmsolver.solve()
-    _, Dcheck0 = split(X0)
-    _, Dcheck1 = split(X1)
-    print("Xm mass check", assemble((Dcheck0-Dcheck1)*dx)/Area)
+if paradiag_n:
+    uh = (1-theta)*w_k*nu
+    Dh = (1-theta)*w_k*nD
+
+    dt_ss = dt_s
+    # positive s inward propagation
+    Ftp = (
+        dt_ss*inner(f*perp(uh),v) - dt_ss*g*Dh*div(v)
+        + dt_ss*div(uh*H)*phi
+    )*dx
+    Ftp += (inner(v, w_k*nu) + phi*w_k*nD)*dx
+    if args.advection:
+        # we are going backwards in time
+        Ftp += dt_ss*advection(uh, ubar, v, upwind=True, vector=True)
+        Ftp += dt_ss*advection(Dh, ubar, phi, continuity=True,
+                              upwind=True, vector=False)
+
+    dt_ss = -dt_s
+    # negative s inward propagation
+    Ftm = (
+        dt_ss*inner(f*perp(uh),v) - dt_ss*g*Dh*div(v)
+        + dt_ss*div(uh*H)*phi
+    )*dx
+    Ftm += (inner(v, w_k*nu) + phi*w_k*nD)*dx
+    if args.advection:
+        Ftm += dt_ss*advection(uh, ubar, v, vector=True, upwind=False)
+        Ftm += dt_ss*advection(Dh, ubar, phi, continuity=True, vector=False, upwind=False)
+
+if paradiag_X:
+    Xpform = asQ.AllAtOnceForm(Xall, alpha*dt/ns, theta,
+                               form_mass, get_form_function(upwind=True))
+    Xpsolver = asQ.AllAtOnceSolver(Xpform, Xall,
+                                   solver_parameters=solver_parameters_diag)
+    Xmform = asQ.AllAtOnceForm(Xall, -alpha*dt/ns, theta,
+                               form_mass, get_form_function(upwind=False))
+    Xmsolver = asQ.AllAtOnceSolver(Xmform, Xall,
+                                   solver_parameters=solver_parameters_diag)
 
 # total number of points is 2ns + 1, because we have s=0
 # after forward loop, W1 contains value at time ns*ds
@@ -697,6 +634,40 @@ weights = np.concatenate((weights, [0]))
 
 print(weights)
 
+# offset_list = []
+# for i_rank in range(len(time_partition_s)):
+#     offset_list.append(sum(time_partition_s[:i_rank]))
+
+# def index2rank(index):
+#     for rank in range(len(offset_list)):
+#         if offset_list[rank] - index > 0:
+#             rank -= 1
+#             break
+#     return rank
+
+# def data_flip(Nall, Nall_new):
+
+#     mpi_requests = []
+
+#     for ilocal in range(time_partition_s[ensemble_rank]):
+#         iglobal = Nall.transform_index(ilocal, from_range='slice', to_range='window')
+#         target = ns-iglobal-1
+
+#         request_send = ensemble.isend(
+#             Nall[ilocal],
+#             dest=index2rank(target),
+#             tag=target)
+#         mpi_requests.extend(request_send)
+
+#         request_recv = ensemble.irecv(
+#             Nall_new[ilocal],
+#             source=index2rank(target),
+#             tag=iglobal)
+#         mpi_requests.extend(request_recv)
+
+#     MPI.Request.Waitall(mpi_requests)
+#     return RHS_new
+
 # Function to take in current state V and return dV/dt
 def average(V, dVdt, positive=True, t=None):
     # forward scatter
@@ -704,9 +675,9 @@ def average(V, dVdt, positive=True, t=None):
         Walls.assign(V)
         with PETSc.Log.Event("forward propagation ds"):
             if positive:
-                forwardp_expsolver.solve()
+                Wpsolver.solve()
             else:
-                forwardm_expsolver.solve()
+                Wmsolver.solve()
         Walls.bcast_field(-1, W1)
     else:
         W0.assign(V)
@@ -721,40 +692,62 @@ def average(V, dVdt, positive=True, t=None):
 
     # backwards gather
     if paradiag_n:
-        for step in range(time_partition_s[ensemble.ensemble_comm.rank]):
+        for step in range(time_partition_s[ensemble_rank]):
             W1.assign(Walls[step])
             step_W = Walls.transform_index(step, from_range='slice', to_range='window')
-            w_k.assign(weights[step_W])
+            step_W_flipped = ns-step_W-1
+            step_flipped = Walls.transform_index(step_W_flipped, from_range='window', to_range='slice')
+            w_k.assign(weights[step_W+1])
             NSolver.solve()
+            if positive:
+                Ftmp = assemble(Ftp)
+            else:
+                Ftmp = assemble(Ftm)
+            for rdat,fdat in zip(RHS[step_flipped].dat, Ftmp.dat):
+                rdat.data[:] = fdat.data[:]
             Nall[step].assign(N)
 
-    X1.assign(0.)
-    for step in ProgressBar(f'average backward').iter(range(ns, 0, -1)):
-        if not paradiag_n:
-            # compute N
-            with PETSc.Log.Event("nonlinearity"):
-                w_k.assign(weights[step])
-                NSolver.solve()
+    if paradiag_X:
+        Xall.zero()
+        # # flip the data in Nall
+        # RHS = data_flip(RHS, RHS_new)
 
-        # propagate X back
-        Nall.bcast_field(step-1, N)
-        with PETSc.Log.Event("backward integration"):
-            if positive:
-                Xpsolver.solve()
+        # solve allatoncesolver with RHS in the option
+        if positive:
+            Xpsolver.solve(rhs=RHS)
+        else:
+            Xmsolver.solve(rhs=RHS)
+        Xall.bcast_field(-1, dVdt)
+    else:
+        X1.assign(0.)
+        for step in ProgressBar(f'average backward').iter(range(ns, 0, -1)):
+            if paradiag_n:
+                Nall.bcast_field(step-1, N)
             else:
-                Xmsolver.solve()
-        X1.assign(X0)
-        if not paradiag_n:
-        # back propagate W
-            if step > 0:
-                with PETSc.Log.Event("backward propagation ds"):
-                    if positive:
-                        backwardp_expsolver.solve()
-                    else:
-                        backwardm_expsolver.solve()
-                W1.assign(W0)
+                # compute N
+                with PETSc.Log.Event("nonlinearity"):
+                    w_k.assign(weights[step])
+                    NSolver.solve()
+
+            # propagate X back
+            with PETSc.Log.Event("backward integration"):
+                if positive:
+                    Xpsolver.solve()
+                else:
+                    Xmsolver.solve()
+            X1.assign(X0)
+            if not paradiag_n:
+                # back propagate W
+                if step > 0:
+                    with PETSc.Log.Event("backward propagation ds"):
+                        if positive:
+                            backwardp_expsolver.solve()
+                        else:
+                            backwardm_expsolver.solve()
+                    W1.assign(W0)
     # copy contents
     dVdt.assign(X0)
+
 
 # Function to apply forward propagation in t
 def propagate(V_in, V_out, t=None, half=False):
@@ -779,8 +772,10 @@ def propagate(V_in, V_out, t=None, half=False):
         # copy contents
         V_out.assign(W1)
 
+
 t = 0.
 tmax = 60.*60.*args.tmax
+#tmax = dt
 dumpt = args.dumpt*60.*60.
 checkt = args.checkt*60.*60.
 tdump = 0.
@@ -884,9 +879,6 @@ U_D.assign(Dn)
 
 mass0 = assemble(U_D*dx)
 
-if args.mass_check:
-    tmax = -666.
-    t = 0.
 
 #start time loop
 print ('tmax', tmax, 'dt', dt)
