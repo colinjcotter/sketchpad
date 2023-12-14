@@ -256,8 +256,8 @@ Wall = asQ.AllAtOnceFunction(ensemble, time_partition_t, W)
 Walls = asQ.AllAtOnceFunction(ensemble, time_partition_t, W)
 Nall = asQ.AllAtOnceFunction(ensemble, time_partition_s, W)
 Xall = asQ.AllAtOnceFunction(ensemble, time_partition_s, W)
-Xall_new = asQ.AllAtOnceFunction(ensemble, time_partition_s, W)
 RHS = asQ.AllAtOnceFunction(ensemble, time_partition_s, W)
+RHS_new = asQ.AllAtOnceFunction(ensemble, time_partition_s, W)
 
 #Set up the forward and backwards scatter discrete exponential operator
 W0 = Function(W)
@@ -634,39 +634,52 @@ weights = np.concatenate((weights, [0]))
 
 print(weights)
 
-# offset_list = []
-# for i_rank in range(len(time_partition_s)):
-#     offset_list.append(sum(time_partition_s[:i_rank]))
+offset_list = []
+for i_rank in range(len(time_partition_s)):
+    offset_list.append(sum(time_partition_s[:i_rank]))
 
-# def index2rank(index):
-#     for rank in range(len(offset_list)):
-#         if offset_list[rank] - index > 0:
-#             rank -= 1
-#             break
-#     return rank
+def index2rank(index):
+    for rank in range(len(offset_list)):
+        if offset_list[rank] - index > 0:
+            rank -= 1
+            break
+    return rank
 
-# def data_flip(Nall, Nall_new):
+def data_flip(Nall, Nall_new):
 
-#     mpi_requests = []
+    mpi_requests = []
 
-#     for ilocal in range(time_partition_s[ensemble_rank]):
-#         iglobal = Nall.transform_index(ilocal, from_range='slice', to_range='window')
-#         target = ns-iglobal-1
+    for ilocal in range(time_partition_s[ensemble_rank]):
+        iglobal = Nall.transform_index(ilocal, from_range='slice', to_range='window')
+        target = ns-iglobal-1
 
-#         request_send = ensemble.isend(
-#             Nall[ilocal],
-#             dest=index2rank(target),
-#             tag=target)
-#         mpi_requests.extend(request_send)
+        request_send = ensemble.isend(
+            Nall[ilocal],
+            dest=index2rank(target),
+            tag=target)
+        mpi_requests.extend(request_send)
 
-#         request_recv = ensemble.irecv(
-#             Nall_new[ilocal],
-#             source=index2rank(target),
-#             tag=iglobal)
-#         mpi_requests.extend(request_recv)
+        request_recv = ensemble.irecv(
+            Nall_new[ilocal],
+            source=index2rank(target),
+            tag=iglobal)
+        mpi_requests.extend(request_recv)
 
-#     MPI.Request.Waitall(mpi_requests)
-#     return RHS_new
+    MPI.Request.Waitall(mpi_requests)
+
+Fall = asQ.AllAtOnceFunction(ensemble, time_partition_s, V2)
+Fall_new = asQ.AllAtOnceFunction(ensemble, time_partition_s, V2)
+
+for ilocal in range(time_partition_s[ensemble_rank]):
+    iglobal = Fall.transform_index(ilocal, from_range='slice', to_range='window')
+    Fall[ilocal].assign(iglobal)
+
+data_flip(Fall, Fall_new)
+
+for ilocal in range(time_partition_s[ensemble_rank]):
+    iglobal = Fall_new.transform_index(ilocal, from_range='slice', to_range='window')
+    i = ns-iglobal-1
+    assert(norm(Fall_new[ilocal] - i) < 1.e-08)
 
 # Function to take in current state V and return dV/dt
 def average(V, dVdt, positive=True, t=None):
@@ -695,28 +708,26 @@ def average(V, dVdt, positive=True, t=None):
         for step in range(time_partition_s[ensemble_rank]):
             W1.assign(Walls[step])
             step_W = Walls.transform_index(step, from_range='slice', to_range='window')
-            step_W_flipped = ns-step_W-1
-            step_flipped = Walls.transform_index(step_W_flipped, from_range='window', to_range='slice')
             w_k.assign(weights[step_W+1])
             NSolver.solve()
             if positive:
                 Ftmp = assemble(Ftp)
             else:
                 Ftmp = assemble(Ftm)
-            for rdat,fdat in zip(RHS[step_flipped].dat, Ftmp.dat):
+            for rdat,fdat in zip(RHS[step].dat, Ftmp.dat):
                 rdat.data[:] = fdat.data[:]
             Nall[step].assign(N)
 
     if paradiag_X:
         Xall.zero()
-        # # flip the data in Nall
-        # RHS = data_flip(RHS, RHS_new)
+        # flip the data in Nall
+        data_flip(RHS, RHS_new)
 
         # solve allatoncesolver with RHS in the option
         if positive:
-            Xpsolver.solve(rhs=RHS)
+            Xpsolver.solve(rhs=RHS_new)
         else:
-            Xmsolver.solve(rhs=RHS)
+            Xmsolver.solve(rhs=RHS_new)
         Xall.bcast_field(-1, dVdt)
     else:
         X1.assign(0.)
