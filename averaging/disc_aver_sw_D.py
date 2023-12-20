@@ -46,7 +46,6 @@ dts = alpha*dt/args.ns
 dt_s = Constant(dts)
 ns = args.ns
 nt = args.nt
-theta = args.theta
 
 if args.check:
     eigs = [0.003465, 0.007274, 0.014955] #maximum frequency for ref 3-5
@@ -247,20 +246,15 @@ monoparameters_ns = {
 }
 
 Nparameters = {
-    "snes_lag_preconditioner": 5,
-    "snes_ksp_ew": None,
     #"snes_monitor": None,
     #'ksp_monitor': None,
-    "ksp_type": "gmres",
+    "ksp_type": "preonly",
     'pc_type': 'fieldsplit',
+    'pc_fieldsplit_type': 'multiplicative',
     'fieldsplit_0_ksp_type':'preonly',
-    'fieldsplit_0_pc_type':'jacobi',
-    'fieldsplit_0_sub_pc_type':'ilu',
+    'fieldsplit_0_pc_type':'lu',
     'fieldsplit_1_ksp_type':'preonly',
-    'fieldsplit_1_pc_type':'bjacobi',
-    'fieldsplit_1_sub_pc_type':'ilu',
-    #"ksp_monitor_true_residual": None,
-    #"ksp_converged_reason": None,
+    'fieldsplit_1_pc_type':'lu',
     "ksp_atol": 1e-8,
     "ksp_rtol": 1e-8,
     "ksp_max_it": 40,
@@ -423,10 +417,6 @@ if args.mass_check:
 # Set up the nonlinear operator W -> N(W)
 gradperp = lambda f: perp(grad(f))
 n = FacetNormal(mesh)
-Upwind = 0.5 * (sign(dot(u1, n)) + 1)
-both = lambda u: 2*avg(u)
-K = 0.5*inner(u1, u1)
-uup = 0.5 * (dot(u1, n) + abs(dot(u1, n)))
 
 N = Function(W)
 nu, nD = split(N)
@@ -440,25 +430,32 @@ Zero = Function(V2).assign(0.)
 L += phi*Zero*dx
 if not args.eta:
     L -= div(v)*g*b*dx
-
+theta = args.theta
 utheta = (1-theta)*u1 + theta*nu
 Dtheta = (1-theta)*D1 + theta*nD
-    
+
+Upwind = 0.5 * (sign(dot(utheta, n)) + 1)
+both = lambda u: 2*avg(u)
+K = 0.5*inner(utheta, utheta)
+uup = 0.5 * (dot(utheta, n) + abs(dot(utheta, n)))
+
+Dt = Constant(dt)
+
 if not args.linear_velocity:
     if vector_invariant:
-        L -= (
+        L -= Dt*(
             + inner(perp(grad(inner(v, perp(utheta)))), utheta)*dx
             - inner(both(perp(n)*inner(v, perp(utheta))),
                     both(Upwind*utheta))*dS
             + div(v)*K*dx
         )
     else:
-        L += advection(utheta, utheta, v, vector=True)
+        L += Dt*advection(utheta, utheta, v, vector=True)
 if not args.linear_height:
     if args.eta:
-        L += advection(Dtheta, utheta, phi, continuity=True, vector=False)
+        L += Dt*advection(Dtheta, utheta, phi, continuity=True, vector=False)
     else:
-        L += advection(Dtheta-H, utheta, phi, continuity=True, vector=False)
+        L += Dt*advection(Dtheta-H, utheta, phi, continuity=True, vector=False)
 
 # for args.eta True we have eta_t + div(u(eta+H)) = eta_t + div(uH) + div(u*eta) [linear and nonlinear]
 # otherwise we have D_t + div(uD) = D_t + div(uH) + div(u(D-H))
@@ -470,12 +467,12 @@ if not args.linear_height:
 
 if args.advection:
     if not args.linear_velocity:
-        L -= advection(utheta, ubar, v, vector=True)
+        L -= Dt*advection(utheta, ubar, v, vector=True)
     if not args.linear_height:
         if args.eta:
-            L -= advection(Dtheta, ubar, phi, continuity=True, vector=False)
+            L -= Dt*advection(Dtheta, ubar, phi, continuity=True, vector=False)
         else:
-            L -= advection(Dtheta, ubar, phi, continuity=True, vector=False)
+            L -= Dt*advection(Dtheta, ubar, phi, continuity=True, vector=False)
 
 #with topography, D = H + eta - b
 
@@ -629,6 +626,7 @@ def average(V, dVdt, positive=True, t=None):
         # compute N
         with PETSc.Log.Event("nonlinearity"):
             w_k.assign(weights[step])
+            N.assign(W1)
             NSolver.solve()
             N.assign((N - W1)/dt)
         # propagate X back
