@@ -87,6 +87,14 @@ y = model.obs()
 y0 = 1.2
 y.dat.data[:] = y0
 
+# prepare the initial ensemble
+a = 1.
+b = 1.
+for i in range(nensemble[bsfilter.ensemble_rank]):
+    dx0 = model.rg.normal(model.R, a, b)
+    u = bsfilter.ensemble[i][0]
+    u.assign(dx0)
+
 # observation noise standard deviation
 S = 0.05
     
