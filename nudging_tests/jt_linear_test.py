@@ -116,7 +116,7 @@ def log_likelihood(y, Y):
     ll = (y-Y)**2/S**2/2*dx
     return ll
 
-jtfilter.assimilation_step(y, log_likelihood)
+jtfilter.assimilation_step(y, log_likelihood, ess_tol=0.5)
 
 # results in a shared array
 posterior = SharedArray(partition=nensemble,
