@@ -147,5 +147,5 @@ if COMM_WORLD.rank == 0:
     b = sigsq + d**2*exp(2*A)
     mean = (b**2*y0 + S**2*a)/(b**2 + S**2)
     variance = b**2*S**2/(b**2 + S**2)
-    print("true mean", mean)
-    print("true variance", variance)
+    print("true mean", mean, mean-np.mean(pvals))
+    print("true variance", variance, variance-np.var(pvals))
