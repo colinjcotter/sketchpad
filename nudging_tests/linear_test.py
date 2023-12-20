@@ -79,8 +79,8 @@ model = LGModel(A=1., D=2., nsteps=nsteps, dt=dt)
 # bootstrap filter
 bsfilter = bootstrap_filter()
 
-nensemble = [20]*5
-bsfilter.setup(nensemble, model)
+nensemble = [2000]*5
+bsfilter.setup(nensemble, model, residual=False)
 
 # data
 y = model.obs()
@@ -95,16 +95,43 @@ for i in range(nensemble[bsfilter.ensemble_rank]):
     u = bsfilter.ensemble[i][0]
     u.assign(dx0)
 
+# initial values in a shared array
+prior = SharedArray(partition=nensemble,
+                        comm=bsfilter.subcommunicators.ensemble_comm)
+for i in range(nensemble[bsfilter.ensemble_rank]):
+    model.u.assign(bsfilter.ensemble[i][0])
+    obsdata = model.obs().dat.data[:]
+    prior.dlocal[i] = obsdata
+
+prior.synchronise()
+    
 # observation noise standard deviation
-S = 0.05
+S = 0.1**2
     
 def log_likelihood(y, Y):
-    ll = (y-Y)**2/S**2/2*dx
+    ll = (y-Y)**2/S/2*dx
     return ll
 
 bsfilter.assimilation_step(y, log_likelihood)
 
-#jtfilter = jittertemp_filter(n_jitt = 10, delta = 0.01,
-#                             verbose=verbose, MALA=MALA,
-#                             nudging=nudging,
-#                             visualise_tape=visualise_tape)
+# results in a shared array
+posterior = SharedArray(partition=nensemble,
+                        comm=bsfilter.subcommunicators.ensemble_comm)
+for i in range(nensemble[bsfilter.ensemble_rank]):
+    model.u.assign(bsfilter.ensemble[i][0])
+    obsdata = model.obs().dat.data[:]
+    posterior.dlocal[i] = obsdata
+posterior.synchronise()
+
+if COMM_WORLD.rank == 0:
+    prvals = prior.data()
+    import matplotlib.pyplot as pp
+    pp.subplot(1,2,1)
+    pp.hist(prvals, bins=20)
+    print("prior mean", np.mean(prvals), "variance", np.var(prvals))
+
+    pvals = posterior.data()
+    pp.subplot(1,2,2)
+    pp.hist(pvals, bins=20)
+    pp.show()
+    print("posterior mean", np.mean(pvals), "variance", np.var(pvals))
