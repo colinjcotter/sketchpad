@@ -1,6 +1,7 @@
 from firedrake import *
 from firedrake_adjoint import *
 pyadjoint.tape.pause_annotation()
+import petsc4py, gc
 
 mesh = UnitSquareMesh(50, 50)
 V = FunctionSpace(mesh, "CG", 1)
@@ -26,8 +27,15 @@ J = assemble(u*u*dx)
 Jhat = ReducedFunctional(J, [Control(q), Control(f)], derivative_components=[0])
 pyadjoint.tape.pause_annotation()
 
+f0 = Function(V)
+f0.assign(f)
+
 for i in range(1000):
-    f.assign(f*1.1)
+    print(i)
+    f.assign(f0*(1+0.5*sin(i)))
     Jhat([q, f])
-    Xopt= minimize(Jhat)
-    print(i, Jhat(Xopt), norm(f), norm(Xopt[1]), norm(Xopt[0]))
+    Jhat.derivative()
+    #Xopt= minimize(Jhat)
+    gc.collect()
+    petsc4py.PETSc.garbage_cleanup(mesh._comm)
+    #print(i, Jhat(Xopt), norm(f), norm(Xopt[1]), norm(Xopt[0]))

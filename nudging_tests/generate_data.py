@@ -1,5 +1,3 @@
-from ctypes import sizeof
-from fileinput import filename
 from firedrake import *
 from pyop2.mpi import MPI
 from nudging import *
