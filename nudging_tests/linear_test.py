@@ -6,7 +6,7 @@ import numpy as np
 # model
 # multiply by A and add D
 T = 1.
-nsteps = 10.
+nsteps = 10
 dt = T/nsteps
 model = LGModel(A=1., D=2., nsteps=nsteps, dt=dt)
 
@@ -79,13 +79,13 @@ model = LGModel(A=1., D=2., nsteps=nsteps, dt=dt)
 # bootstrap filter
 bsfilter = bootstrap_filter()
 
-nensemble = [10]*10
+nensemble = [20]*5
 bsfilter.setup(nensemble, model)
 
 # data
 y = model.obs()
 y0 = 1.2
-y.dat.data[:].assign(y0)
+y.dat.data[:] = y0
 
 # observation noise standard deviation
 S = 0.05
