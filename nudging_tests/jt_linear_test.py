@@ -10,7 +10,8 @@ nsteps = 10
 dt = T/nsteps
 A = 1.
 D = 2.
-model = LSDEModel(A=A, D=D, nsteps=nsteps, dt=dt)
+model = LSDEModel(A=A, D=D, nsteps=nsteps, dt=dt,
+                  lambdas=True)
 
 # solving
 # dx = A*x*dt + D*dW
@@ -80,8 +81,10 @@ model = LSDEModel(A=A, D=D, nsteps=nsteps, dt=dt)
 
 MALA = False
 verbose = True
+nudging = True
 jtfilter = jittertemp_filter(n_jitt=5, delta=0.15,
-                             verbose=verbose, MALA=MALA)
+                             verbose=verbose, MALA=MALA,
+                             nudging=nudging)
 
 nensemble = [10]*10
 jtfilter.setup(nensemble, model, residual=False)
