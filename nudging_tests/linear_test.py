@@ -8,7 +8,9 @@ import numpy as np
 T = 1.
 nsteps = 10
 dt = T/nsteps
-model = LGModel(A=1., D=2., nsteps=nsteps, dt=dt)
+A = 1.
+D = 2.
+model = LSDEModel(A=A, D=D, nsteps=nsteps, dt=dt)
 
 # solving
 # dx = A*x*dt + D*dW
@@ -79,7 +81,7 @@ model = LGModel(A=1., D=2., nsteps=nsteps, dt=dt)
 # bootstrap filter
 bsfilter = bootstrap_filter()
 
-nensemble = [2000]*5
+nensemble = [200]*5
 bsfilter.setup(nensemble, model, residual=False)
 
 # data
@@ -88,10 +90,10 @@ y0 = 1.2
 y.dat.data[:] = y0
 
 # prepare the initial ensemble
-a = 1.
-b = 1.
+c = 1.
+d = 1.
 for i in range(nensemble[bsfilter.ensemble_rank]):
-    dx0 = model.rg.normal(model.R, a, b)
+    dx0 = model.rg.normal(model.R, c, d**2)
     u = bsfilter.ensemble[i][0]
     u.assign(dx0)
 
@@ -106,10 +108,10 @@ for i in range(nensemble[bsfilter.ensemble_rank]):
 prior.synchronise()
     
 # observation noise standard deviation
-S = 0.1**2
+S = 0.3
     
 def log_likelihood(y, Y):
-    ll = (y-Y)**2/S/2*dx
+    ll = (y-Y)**2/S**2/2*dx
     return ll
 
 bsfilter.assimilation_step(y, log_likelihood)
@@ -135,3 +137,15 @@ if COMM_WORLD.rank == 0:
     pp.hist(pvals, bins=20)
     pp.show()
     print("posterior mean", np.mean(pvals), "variance", np.var(pvals))
+
+    # analytical formula
+    # x(1)|y ~ N((b^2y + S^2a)/(b^2+S^2), (b^2S^2)/(b^2 + S^2))
+    # where a = c*exp(A), b = (sig^2+d^2*exp(2A))
+    # sig^2 = (D^2/2A)*(e^{2A} - 1)
+    a = c*exp(A)
+    sigsq = D**2/2/A*(exp(2*A) - 1)  # t = 1
+    b = sigsq + d**2*exp(2*A)
+    mean = (b**2*y0 + S**2*a)/(b**2 + S**2)
+    variance = b**2*S**2/(b**2 + S**2)
+    print("true mean", mean)
+    print("true variance", variance)
