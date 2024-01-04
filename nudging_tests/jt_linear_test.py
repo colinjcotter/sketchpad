@@ -81,12 +81,12 @@ model = LSDEModel(A=A, D=D, nsteps=nsteps, dt=dt,
 
 MALA = False
 verbose = True
-nudging = False
+nudging = True
 jtfilter = jittertemp_filter(n_jitt=10, delta=0.15,
                              verbose=verbose, MALA=MALA,
                              nudging=nudging)
 
-nensemble = [100]*10
+nensemble = [20]*10
 jtfilter.setup(nensemble, model, residual=False)
 
 # data
@@ -119,7 +119,7 @@ def log_likelihood(y, Y):
     ll = (y-Y)**2/S**2/2*dx
     return ll
 
-jtfilter.assimilation_step(y, log_likelihood, ess_tol=0.5)
+jtfilter.assimilation_step(y, log_likelihood, ess_tol=0.8)
 
 # results in a shared array
 posterior = SharedArray(partition=nensemble,
