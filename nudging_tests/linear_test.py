@@ -127,15 +127,15 @@ posterior.synchronise()
 
 if COMM_WORLD.rank == 0:
     prvals = prior.data()
-    import matplotlib.pyplot as pp
-    pp.subplot(1,2,1)
-    pp.hist(prvals, bins=20)
+    #import matplotlib.pyplot as pp
+    #pp.subplot(1,2,1)
+    #pp.hist(prvals, bins=20)
     print("prior mean", np.mean(prvals), "variance", np.var(prvals))
 
     pvals = posterior.data()
-    pp.subplot(1,2,2)
-    pp.hist(pvals, bins=20)
-    pp.show()
+    #pp.subplot(1,2,2)
+    #pp.hist(pvals, bins=20)
+    #pp.show()
     print("posterior mean", np.mean(pvals), "variance", np.var(pvals))
 
     # analytical formula

@@ -81,12 +81,12 @@ model = LSDEModel(A=A, D=D, nsteps=nsteps, dt=dt,
 
 MALA = False
 verbose = True
-nudging = True
-jtfilter = jittertemp_filter(n_jitt=5, delta=0.15,
+nudging = False
+jtfilter = jittertemp_filter(n_jitt=10, delta=0.15,
                              verbose=verbose, MALA=MALA,
                              nudging=nudging)
 
-nensemble = [10]*10
+nensemble = [100]*10
 jtfilter.setup(nensemble, model, residual=False)
 
 # data
@@ -132,15 +132,15 @@ posterior.synchronise()
 
 if COMM_WORLD.rank == 0:
     prvals = prior.data()
-    import matplotlib.pyplot as pp
-    pp.subplot(1,2,1)
-    pp.hist(prvals, bins=20)
+    #import matplotlib.pyplot as pp
+    #pp.subplot(1,2,1)
+    #pp.hist(prvals, bins=20)
     print("prior mean", np.mean(prvals), "variance", np.var(prvals))
 
     pvals = posterior.data()
-    pp.subplot(1,2,2)
-    pp.hist(pvals, bins=20)
-    pp.show()
+    #pp.subplot(1,2,2)
+    #pp.hist(pvals, bins=20)
+    #pp.show()
     print("posterior mean", np.mean(pvals), "variance", np.var(pvals))
 
     # analytical formula
@@ -152,5 +152,5 @@ if COMM_WORLD.rank == 0:
     b = sigsq + d**2*exp(2*A)
     mean = (b**2*y0 + S**2*a)/(b**2 + S**2)
     variance = b**2*S**2/(b**2 + S**2)
-    print("true mean", mean, mean-np.mean(pvals))
-    print("true variance", variance, variance-np.var(pvals))
+    print("true mean", mean, "relative error", (mean-np.mean(pvals))/mean)
+    print("true variance", variance, "relative error", (variance-np.var(pvals))/variance)
