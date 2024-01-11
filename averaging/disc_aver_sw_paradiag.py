@@ -756,8 +756,8 @@ def average(V, dVdt, positive=True, t=None):
                         else:
                             backwardm_expsolver.solve()
                     W1.assign(W0)
-    # copy contents
-    dVdt.assign(X0)
+        # copy contents
+        dVdt.assign(X0)
 
 
 # Function to apply forward propagation in t
