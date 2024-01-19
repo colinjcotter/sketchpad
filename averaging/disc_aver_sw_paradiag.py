@@ -255,9 +255,10 @@ else:
 Wall = asQ.AllAtOnceFunction(ensemble, time_partition_t, W)
 Walls = asQ.AllAtOnceFunction(ensemble, time_partition_t, W)
 Nall = asQ.AllAtOnceFunction(ensemble, time_partition_s, W)
+Nall_new = asQ.AllAtOnceFunction(ensemble, time_partition_s, W)
 Xall = asQ.AllAtOnceFunction(ensemble, time_partition_s, W)
-RHS = asQ.AllAtOnceFunction(ensemble, time_partition_s, W)
-RHS_new = asQ.AllAtOnceFunction(ensemble, time_partition_s, W)
+RHS = asQ.AllAtOnceCofunction(ensemble, time_partition_s, W.dual())
+RHS_new = asQ.AllAtOnceCofunction(ensemble, time_partition_s, W.dual())
 
 #Set up the forward and backwards scatter discrete exponential operator
 W0 = Function(W)
@@ -521,11 +522,11 @@ u1, D1 = split(X1)
 # exph(L ds) = (1 - ds/2*L)^{-1}(1 + ds/2*L)
 # exph(-L ds) = (1 + ds/2*L)^{-1}(1 - ds/2*L)
 
-# X^k = sum_{m=k}^M w_m (exph(-L ds))^m N(W_m)
+# X^k = sum_{m=k}^M w_m (exph(-L ds))^(m-k) N(W_m)
 # X^{M+1} = 0
 # X^{k-1} = exph(-L ds)X^k + w_{k-1}*N(W_{k-1})
-# (1 + ds/2*L)X^{k-1} = (1 - ds/2*L)X^k + w_k*(1 + ds/2*L)N(W_{k-1})
-# X^k - X^{k-1] - ds*L(X^{k-1/2} + w_k N(W_{k-1})/2) + w_k W_{k-1} = 0
+# (1 - ds/2*L)X^k + w_k*(1 + ds/2*L)N(W_{k-1}) = (1 + ds/2*L)X^{k-1}
+# X^k - X^{k-1] - ds*L(X^{k-1/2} + ds/2*w_k N(W_{k-1})) + w_k N(W_{k-1}) = 0
 
 # we propagate W back, compute N, use to propagate X back
 
@@ -710,19 +711,16 @@ def average(V, dVdt, positive=True, t=None):
             step_W = Walls.transform_index(step, from_range='slice', to_range='window')
             w_k.assign(weights[step_W+1])
             NSolver.solve()
-            if positive:
-                Ftmp = assemble(Ftp)
-            else:
-                Ftmp = assemble(Ftm)
-            for rdat,fdat in zip(RHS[step].dat, Ftmp.dat):
-                rdat.data[:] = fdat.data[:]
             Nall[step].assign(N)
+            if positive:
+                assemble(-Ftp, tensor=RHS[step])
+            else:
+                assemble(-Ftm, tensor=RHS[step])
 
     if paradiag_X:
         Xall.zero()
         # flip the data in Nall
         data_flip(RHS, RHS_new)
-
         # solve allatoncesolver with RHS in the option
         if positive:
             Xpsolver.solve(rhs=RHS_new)
@@ -731,31 +729,16 @@ def average(V, dVdt, positive=True, t=None):
         Xall.bcast_field(-1, dVdt)
     else:
         X1.assign(0.)
-        for step in ProgressBar(f'average backward').iter(range(ns, 0, -1)):
-            if paradiag_n:
-                Nall.bcast_field(step-1, N)
-            else:
-                # compute N
-                with PETSc.Log.Event("nonlinearity"):
-                    w_k.assign(weights[step])
-                    NSolver.solve()
-
-            # propagate X back
-            with PETSc.Log.Event("backward integration"):
+        # flip the data in Nall
+        data_flip(Nall, Nall_new)
+        for step in ProgressBar(f'average forward after flipping').iter(range(ns)):
+            Nall_new.bcast_field(step, N)
+            with PETSc.Log.Event("forward integration after flipping"):
                 if positive:
                     Xpsolver.solve()
                 else:
                     Xmsolver.solve()
             X1.assign(X0)
-            if not paradiag_n:
-                # back propagate W
-                if step > 0:
-                    with PETSc.Log.Event("backward propagation ds"):
-                        if positive:
-                            backwardp_expsolver.solve()
-                        else:
-                            backwardm_expsolver.solve()
-                    W1.assign(W0)
         # copy contents
         dVdt.assign(X0)
 
