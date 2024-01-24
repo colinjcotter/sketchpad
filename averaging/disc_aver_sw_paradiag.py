@@ -579,26 +579,28 @@ if paradiag_n:
     dt_ss = dt_s
     # positive s inward propagation
     Ftp = (
-        dt_ss*inner(f*perp(uh),v) - dt_ss*g*Dh*div(v)
-        + dt_ss*div(uh*H)*phi
+        inner(f*perp(uh),v) - g*Dh*div(v)
+        + div(uh*H)*phi
     )*dx
-    Ftp += (inner(v, w_k*nu) + phi*w_k*nD)*dx
+    Ftp += (inner(v, w_k*nu)/dt_ss + phi*w_k*nD/dt_ss)*dx
     if args.advection:
         # we are going backwards in time
-        Ftp += dt_ss*advection(uh, ubar, v, upwind=True, vector=True)
-        Ftp += dt_ss*advection(Dh, ubar, phi, continuity=True,
+        Ftp += advection(uh, ubar, v, upwind=True, vector=True)
+        Ftp += advection(Dh, ubar, phi, continuity=True,
                               upwind=True, vector=False)
 
     dt_ss = -dt_s
     # negative s inward propagation
     Ftm = (
-        dt_ss*inner(f*perp(uh),v) - dt_ss*g*Dh*div(v)
-        + dt_ss*div(uh*H)*phi
+        inner(f*perp(uh),v) - g*Dh*div(v)
+        + div(uh*H)*phi
     )*dx
-    Ftm += (inner(v, w_k*nu) + phi*w_k*nD)*dx
+    Ftm += (inner(v, w_k*nu)/dt_ss + phi*w_k*nD/dt_ss)*dx
     if args.advection:
-        Ftm += dt_ss*advection(uh, ubar, v, vector=True, upwind=False)
-        Ftm += dt_ss*advection(Dh, ubar, phi, continuity=True, vector=False, upwind=False)
+        Ftm += advection(uh, ubar, v, vector=True, upwind=False)
+        Ftm += advection(Dh, ubar, phi, continuity=True, vector=False, upwind=False)
+
+
 
 if paradiag_X:
     Xpform = asQ.AllAtOnceForm(Xall, alpha*dt/ns, theta,
