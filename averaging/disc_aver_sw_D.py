@@ -12,10 +12,10 @@ parser.add_argument('--ref_level', type=int, default=3, help='Refinement level o
 parser.add_argument('--tmax', type=float, default=360, help='Final time in hours. Default 24x15=360.')
 parser.add_argument('--dumpt', type=float, default=6, help='Dump time in hours. Default 6.')
 parser.add_argument('--checkt', type=float, default=6, help='Create checkpointing file every checkt hours. Default 6.')
-parser.add_argument('--dt', type=float, default=1, help='Timestep in hours. Default 3.')
-parser.add_argument('--ns', type=int, default=5, help='Number of s steps in exponential approximation for average')
+parser.add_argument('--dt', type=float, default=0.5, help='Timestep in hours. Default 3.')
+parser.add_argument('--ns', type=int, default=4, help='Number of s steps in exponential approximation for average')
 parser.add_argument('--nt', type=int, default=4, help='Number of t steps in exponential approximation for time propagator')
-parser.add_argument('--alpha', type=float, default=2, help='Averaging window width as a multiple of dt. Default 1.')
+parser.add_argument('--alpha', type=float, default=1, help='Averaging window width as a multiple of dt. Default 1.')
 parser.add_argument('--filename', type=str, default='w2', help='filename for pvd')
 parser.add_argument('--check', action="store_true", help='print out some information about frequency resolution and exit')
 parser.add_argument('--advection', action="store_true", help='include mean flow advection in L.')
@@ -615,7 +615,7 @@ def average(V, dVdt, positive=True, t=None):
         W0.assign(W1)
     # backwards gather
     X1.assign(0.)
-    for step in ProgressBar(f'average backward').iter(range(ns, 0, -1)):
+    for step in ProgressBar(f'average backward').iter(range(ns, -1, -1)):
         # compute N
         with PETSc.Log.Event("nonlinearity"):
             w_k.assign(weights[step])
@@ -823,37 +823,51 @@ while t < tmax - 0.5*dt:
     elif timestepping == 'rk4':
         print("RK stage 1")
         average(U0, Average, positive=True, t=t)
+        print("--average")
         V1.assign(dt*Average)
         average(U0, Average, positive=False, t=t)
+        print("--average")
         V1 += dt*Average
         U1.assign(U0 + V1/2)
 
         print("RK stage 2")
         propagate(U1, U1, t=t, val=0.5)
+        print("--propagate")
         average(U1, Average, positive=True, t=t)
+        print("--average")
         V2.assign(dt*Average)
         average(U1, Average, positive=False, t=t)
+        print("--average")
         V2 += dt*Average
         propagate(U0, V, t=t, val=0.5)
+        print("--propagate")
         U2.assign(V + V2/2)
 
         print("RK stage 3")
         average(U2, Average, positive=True, t=t)
+        print("--average")
         V3.assign(dt*Average)
         average(U2, Average, positive=False, t=t)
+        print("--average")
         V3 += dt*Average
         U3.assign(V + V3)
 
         print("RK stage 4")
         U1.assign(V2 + V3)
         propagate(U1, U2, t=t, val=0.5)
+        print("--propagate")
         propagate(U3, V3, t=t, val=0.5)
+        print("--propagate")
         average(V3, Average, positive=True, t=t)
+        print("--average")
         U3.assign(dt*Average)
         average(V3, Average, positive=False, t=t)
+        print("--average")
         U3 += dt*Average
         propagate(V1, U1, t=t)
+        print("--propagate")
         propagate(U0, V, t=t)
+        print("--propagate")
         U0.assign(V + 1/6*U1 + 1/3*U2 + 1/6*U3)
 
     if args.dynamic_ubar:
@@ -861,25 +875,25 @@ while t < tmax - 0.5*dt:
         u, _ = Uproj.subfunctions
         ubar.assign(un + u)
     print("mass error", (mass0-assemble(U_D*dx))/Area)
-    
+
+    #calculate norms for debug (every time step)
+    un.assign(U_u)
+    Dn.assign(U_D)
+    if args.eta:
+        etan.assign(Dn)
+    else:
+        etan.assign(Dn-H0+b)
+    etanorm = errornorm(etan, etaini)/norm(etaini)
+    unorm = errornorm(un, uini, norm_type="Hdiv")/norm(uini, norm_type="Hdiv")
+    print('etanorm', etanorm, 'unorm', unorm)
+
+    #dump results every tdump hours
     if tdump > dumpt - dt*0.5:
-        un.assign(U_u)
-        Dn.assign(U_D)
-        if args.eta:
-            etan.assign(Dn)
-        else:
-            etan.assign(Dn-H0+b)
         file_sw.write(un, etan, b)
         tdump -= dumpt
 
     #create checkpointing file every tcheck hours
     if tcheck > checkt - dt*0.5:
-        un.assign(U_u)
-        Dn.assign(U_D)
-        if args.eta:
-            etan.assign(Dn)
-        else:
-            etan.assign(Dn-H0+b)
         thours = int(t/3600)
         chk = DumbCheckpoint(name+"_"+str(thours)+"h", mode=FILE_CREATE)
         tcheck -= checkt
@@ -890,10 +904,5 @@ while t < tmax - 0.5*dt:
         chk.write_attribute("/", "tcheck", tcheck)
         chk.close()
         print("checkpointed at t =", t)
-
-        #calculate norms for debug
-        etanorm = errornorm(etan, etaini)/norm(etaini)
-        unorm = errornorm(un, uini, norm_type="Hdiv")/norm(uini, norm_type="Hdiv")
-        print('etanorm', etanorm, 'unorm', unorm)
 
 print("Completed calculation at t = ", t/3600, "hours")
