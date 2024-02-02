@@ -253,7 +253,7 @@ else:
 
 #Set up all at once functions
 Wall = asQ.AllAtOnceFunction(ensemble, time_partition_t, W)
-Walls = asQ.AllAtOnceFunction(ensemble, time_partition_t, W)
+Walls = asQ.AllAtOnceFunction(ensemble, time_partition_s, W)
 Nall = asQ.AllAtOnceFunction(ensemble, time_partition_s, W)
 Nall_new = asQ.AllAtOnceFunction(ensemble, time_partition_s, W)
 Xall = asQ.AllAtOnceFunction(ensemble, time_partition_s, W)
