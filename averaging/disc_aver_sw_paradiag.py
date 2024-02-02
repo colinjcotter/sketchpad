@@ -10,9 +10,9 @@ print = PETSc.Sys.Print
 import argparse
 parser = argparse.ArgumentParser(description='Williamson 5 testcase for averaged propagator using D (thickness) as the pressure variable.')
 parser.add_argument('--ref_level', type=int, default=3, help='Refinement level of icosahedral grid. Default 3.')
-parser.add_argument('--tmax', type=float, default=1, help='Final time in hours. Default 24x15=360.')
-parser.add_argument('--dumpt', type=float, default=0.5, help='Dump time in hours. Default 6.')
-parser.add_argument('--checkt', type=float, default=0.5, help='Create checkpointing file every checkt hours. Default 6.')
+parser.add_argument('--tmax', type=float, default=360, help='Final time in hours. Default 24x15=360.')
+parser.add_argument('--dumpt', type=float, default=6, help='Dump time in hours. Default 6.')
+parser.add_argument('--checkt', type=float, default=6, help='Create checkpointing file every checkt hours. Default 6.')
 parser.add_argument('--dt', type=float, default=0.5, help='Timestep in hours. Default 3.')
 parser.add_argument('--ns', type=int, default=4, help='Number of s steps in exponential approximation for average')
 parser.add_argument('--nt', type=int, default=4, help='Number of t steps in exponential approximation for time propagator')
@@ -30,7 +30,7 @@ parser.add_argument('--linear_height', action='store_true', help='Drop the heigh
 parser.add_argument('--timestepping', type=str, default='rk4', choices=['rk4', 'heuns'], help='Choose a time steeping method. Default heuns.')
 parser.add_argument('--pickup', action='store_true', help='Pickup the result from the checkpoint.')
 parser.add_argument('--pickup_from', type=str, default='w2')
-parser.add_argument('--nslices', type=int, default=1, help='Number of time-slices per time-window.')
+parser.add_argument('--nslices', type=int, default=4, help='Number of time-slices per time-window.')
 parser.add_argument('--alphap', type=float, default=0.0001, help='Circulant coefficient.')
 parser.add_argument('--paradiag_dt', action="store_true", help='Use paradiag for propagate solve')
 parser.add_argument('--paradiag_fs', action="store_true", help='Use paradiag for forward scatter')
@@ -195,7 +195,7 @@ solver_parameters_diag = {
 }
 
 # setup parameters for paradiag solve (the number of windows is fixed to 1)
-solver_parameters_diag['diagfft_block_'+str(i)+'_'] = monoparameters_ns
+solver_parameters_diag['diagfft_block_'+str(i)+'_'] = hparams
 
 PETSc.Sys.Print('### === --- Calculating parallel solution --- === ###')
 
@@ -731,18 +731,47 @@ def average(V, dVdt, positive=True, t=None):
         Xall.bcast_field(-1, dVdt)
     else:
         X1.assign(0.)
-        # flip the data in Nall
-        data_flip(Nall, Nall_new)
-        for step in ProgressBar(f'average forward after flipping').iter(range(ns)):
-            Nall_new.bcast_field(step, N)
-            with PETSc.Log.Event("forward integration after flipping"):
+        for step in ProgressBar(f'average backward').iter(range(ns, -1, -1)):
+            if paradiag_n:
+                Nall.bcast_field(step-1, N)
+            else:
+                # compute N
+                with PETSc.Log.Event("nonlinearity"):
+                    w_k.assign(weights[step])
+                    NSolver.solve()
+
+            # propagate X back
+            with PETSc.Log.Event("backward integration"):
                 if positive:
                     Xpsolver.solve()
                 else:
                     Xmsolver.solve()
             X1.assign(X0)
+            if not paradiag_n:
+                # back propagate W
+                if step > 0:
+                    with PETSc.Log.Event("backward propagation ds"):
+                        if positive:
+                            backwardp_expsolver.solve()
+                        else:
+                            backwardm_expsolver.solve()
+                    W1.assign(W0)
         # copy contents
         dVdt.assign(X0)
+
+        # X1.assign(0.)
+        # # flip the data in Nall
+        # data_flip(Nall, Nall_new)
+        # for step in ProgressBar(f'average forward after flipping').iter(range(ns)):
+        #     Nall_new.bcast_field(step, N)
+        #     with PETSc.Log.Event("forward integration after flipping"):
+        #         if positive:
+        #             Xpsolver.solve()
+        #         else:
+        #             Xmsolver.solve()
+        #     X1.assign(X0)
+        # # copy contents
+        # dVdt.assign(X0)
 
 
 # Function to apply forward propagation in t
@@ -939,37 +968,51 @@ while t < tmax - 0.5*dt:
     elif timestepping == 'rk4':
         print("RK stage 1")
         average(U0, Average, positive=True, t=t)
+        print("--average")
         V1.assign(dt*Average)
         average(U0, Average, positive=False, t=t)
+        print("--average")
         V1 += dt*Average
         U1.assign(U0 + V1/2)
 
         print("RK stage 2")
         propagate(U1, U1, t=t, half=True)
+        print("--propagate")
         average(U1, Average, positive=True, t=t)
+        print("--average")
         V2.assign(dt*Average)
         average(U1, Average, positive=False, t=t)
+        print("--average")
         V2 += dt*Average
         propagate(U0, V, t=t, half=True)
+        print("--propagate")
         U2.assign(V + V2/2)
 
         print("RK stage 3")
         average(U2, Average, positive=True, t=t)
+        print("--average")
         V3.assign(dt*Average)
         average(U2, Average, positive=False, t=t)
+        print("--average")
         V3 += dt*Average
         U3.assign(V + V3)
 
         print("RK stage 4")
         U1.assign(V2 + V3)
         propagate(U1, U2, t=t, half=True)
+        print("--propagate")
         propagate(U3, V3, t=t, half=True)
+        print("--propagate")
         average(V3, Average, positive=True, t=t)
+        print("--average")
         U3.assign(dt*Average)
         average(V3, Average, positive=False, t=t)
+        print("--average")
         U3 += dt*Average
         propagate(V1, U1, t=t)
+        print("--propagate")
         propagate(U0, V, t=t)
+        print("--propagate")
         U0.assign(V + 1/6*U1 + 1/3*U2 + 1/6*U3)
 
     if args.dynamic_ubar:
@@ -977,25 +1020,26 @@ while t < tmax - 0.5*dt:
         u, _ = Uproj.subfunctions
         ubar.assign(un + u)
     print("mass error", (mass0-assemble(U_D*dx))/Area)
-    
+
+    #calculate norms for debug (every time step)
+    un.assign(U_u)
+    Dn.assign(U_D)
+    if args.eta:
+        etan.assign(Dn)
+    else:
+        etan.assign(Dn-H0+b)
+    etanorm = errornorm(etan, etaini)/norm(etaini)
+    unorm = errornorm(un, uini, norm_type="Hdiv")/norm(uini, norm_type="Hdiv")
+    print('etanorm', etanorm, 'unorm', unorm)
+
+    #dump results every tdump hours
     if tdump > dumpt - dt*0.5:
-        un.assign(U_u)
-        Dn.assign(U_D)
-        if args.eta:
-            etan.assign(Dn)
-        else:
-            etan.assign(Dn-H0+b)
         file_sw.write(un, etan, b)
         tdump -= dumpt
+        print("dumped results at t =", t)
 
     #create checkpointing file every tcheck hours
     if tcheck > checkt - dt*0.5:
-        un.assign(U_u)
-        Dn.assign(U_D)
-        if args.eta:
-            etan.assign(Dn)
-        else:
-            etan.assign(Dn-H0+b)
         thours = int(t/3600)
         chk = DumbCheckpoint(name+"_"+str(thours)+"h", mode=FILE_CREATE)
         tcheck -= checkt
@@ -1006,10 +1050,5 @@ while t < tmax - 0.5*dt:
         chk.write_attribute("/", "tcheck", tcheck)
         chk.close()
         print("checkpointed at t =", t)
-
-        #calculate norms for debug
-        etanorm = errornorm(etan, etaini)/norm(etaini)
-        unorm = errornorm(un, uini, norm_type="Hdiv")/norm(uini, norm_type="Hdiv")
-        print('etanorm', etanorm, 'unorm', unorm)
 
 print("Completed calculation at t = ", t/3600, "hours")
