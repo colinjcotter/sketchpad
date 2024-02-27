@@ -12,7 +12,7 @@ parser = argparse.ArgumentParser(description='Williamson 5 testcase for averaged
 parser.add_argument('--ref_level', type=int, default=3, help='Refinement level of icosahedral grid. Default 3.')
 parser.add_argument('--tmax', type=float, default=360, help='Final time in hours. Default 24x15=360.')
 parser.add_argument('--dumpt', type=float, default=6, help='Dump time in hours. Default 6.')
-parser.add_argument('--checkt', type=float, default=6, help='Create checkpointing file every checkt hours. Default 6.')
+parser.add_argument('--checkt', type=float, default=24, help='Create checkpointing file every checkt hours. Default 6.')
 parser.add_argument('--dt', type=float, default=0.5, help='Timestep in hours. Default 3.')
 parser.add_argument('--ns', type=int, default=4, help='Number of s steps in exponential approximation for average')
 parser.add_argument('--nt', type=int, default=4, help='Number of t steps in exponential approximation for time propagator')
@@ -30,12 +30,13 @@ parser.add_argument('--linear_height', action='store_true', help='Drop the heigh
 parser.add_argument('--timestepping', type=str, default='rk4', choices=['rk4', 'heuns'], help='Choose a time steeping method. Default heuns.')
 parser.add_argument('--pickup', action='store_true', help='Pickup the result from the checkpoint.')
 parser.add_argument('--pickup_from', type=str, default='w2')
-parser.add_argument('--nslices', type=int, default=4, help='Number of time-slices per time-window.')
+parser.add_argument('--nslices', type=int, default=2, help='Number of time-slices per time-window.')
 parser.add_argument('--alphap', type=float, default=0.0001, help='Circulant coefficient.')
 parser.add_argument('--paradiag_dt', action="store_true", help='Use paradiag for propagate solve')
 parser.add_argument('--paradiag_fs', action="store_true", help='Use paradiag for forward scatter')
 parser.add_argument('--paradiag_n', action="store_true", help='Use paradiag for nonlinear operator')
-parser.add_argument('--paradiag_X', action="store_true", help='Use paradiag for nonlinear operator')
+parser.add_argument('--paradiag_X', action="store_true", help='Use paradiag for backward gather')
+parser.add_argument('--constant_jacobian', action="store_true", help='Use constant_jacobian option for faster calculation')
 
 args = parser.parse_known_args()
 args = args[0]
@@ -202,11 +203,14 @@ PETSc.Sys.Print('### === --- Calculating parallel solution --- === ###')
 # setup slice length
 slice_length_t = int(nt/args.nslices)
 assert(slice_length_t*args.nslices == nt)
+slice_length_t_half = int(nt/2/args.nslices)
+assert(slice_length_t_half*args.nslices == nt/2)
 slice_length_s = int(ns/args.nslices)
 assert(slice_length_s*args.nslices == ns)
 
 # setup time_partition
 time_partition_t = [slice_length_t for _ in range(args.nslices)]
+time_partition_t_half = [slice_length_t_half for _ in range(args.nslices)]
 time_partition_s = [slice_length_s for _ in range(args.nslices)]
 
 # setup ensemble
@@ -253,6 +257,7 @@ else:
 
 #Set up all at once functions
 Wall = asQ.AllAtOnceFunction(ensemble, time_partition_t, W)
+Wallh = asQ.AllAtOnceFunction(ensemble, time_partition_t_half, W)
 Walls = asQ.AllAtOnceFunction(ensemble, time_partition_s, W)
 Nall = asQ.AllAtOnceFunction(ensemble, time_partition_s, W)
 Nall_new = asQ.AllAtOnceFunction(ensemble, time_partition_s, W)
@@ -275,7 +280,7 @@ if args.advection:
 if args.dynamic_ubar:
     constant_jacobian = False
 else:
-    constant_jacobian = True
+    constant_jacobian = args.constant_jacobian
 
 def advection(F, ubar, v, continuity=False, vector=False, upwind=True):
     """
@@ -419,9 +424,9 @@ if paradiag_dt:
                                        form_mass, get_form_function())
     propagate_solver = asQ.AllAtOnceSolver(propagate_form, Wall,
                                            solver_parameters=solver_parameters_diag)
-    propagate_form_half = asQ.AllAtOnceForm(Wall, 0.5*dt/nt, theta,
+    propagate_form_half = asQ.AllAtOnceForm(Wallh, dt/nt, theta,
                                             form_mass, get_form_function())
-    propagate_solver_half = asQ.AllAtOnceSolver(propagate_form_half, Wall,
+    propagate_solver_half = asQ.AllAtOnceSolver(propagate_form_half, Wallh,
                                                 solver_parameters=solver_parameters_diag)
 
 if paradiag_fs:
@@ -508,7 +513,7 @@ if args.advection:
 #with topography, D = H + eta - b
 
 NProb = LinearVariationalProblem(lhs(L), rhs(L), N,
-                                 constant_jacobian=True)
+                                 constant_jacobian=constant_jacobian)
 NSolver = LinearVariationalSolver(NProb,
                                   solver_parameters = mparams)
 
@@ -777,12 +782,14 @@ def average(V, dVdt, positive=True, t=None):
 # Function to apply forward propagation in t
 def propagate(V_in, V_out, t=None, half=False):
     if paradiag_dt:
-        Wall.assign(V_in)
         if half:
+            Wallh.assign(V_in)
             propagate_solver_half.solve()
+            Wallh.bcast_field(-1, V_out)
         else:
+            Wall.assign(V_in)
             propagate_solver.solve()
-        Wall.bcast_field(-1, V_out)
+            Wall.bcast_field(-1, V_out)
     else:
         W0.assign(V_in)
         if half:
@@ -796,7 +803,6 @@ def propagate(V_in, V_out, t=None, half=False):
                 W0.assign(W1)
         # copy contents
         V_out.assign(W1)
-
 
 t = 0.
 tmax = 60.*60.*args.tmax
