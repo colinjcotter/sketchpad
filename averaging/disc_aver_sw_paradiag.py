@@ -689,8 +689,19 @@ for ilocal in range(time_partition_s[ensemble_rank]):
     i = ns-iglobal-1
     assert(norm(Fall_new[ilocal] - i) < 1.e-08)
 
+V = Function(W)
+dVdt = Function(W)
+Average = Function(W)
+
+def average(V, Average, t=None):
+    get_dVdt(V, dVdt, positive=True, t=t)
+    Average.assign(dt*dVdt)
+    get_dVdt(V, dVdt, positive=False, t=t)
+    Average += dt*dVdt
+
+
 # Function to take in current state V and return dV/dt
-def average(V, dVdt, positive=True, t=None):
+def get_dVdt(V, dVdt, positive=True, t=None):
     # forward scatter
     if paradiag_fs:
         Walls.assign(V)
@@ -896,11 +907,9 @@ U1 = Function(W)
 U2 = Function(W)
 U3 = Function(W)
 Ustar = Function(W)
-Average = Function(W)
 V1 = Function(W)
 V2 = Function(W)
 V3 = Function(W)
-V = Function(W)
 
 # set up initial conditions
 U_u, U_D = U0.subfunctions
@@ -958,67 +967,41 @@ while t < tmax - 0.5*dt:
             U1 /= 2
 
             # Compute U^* = exp(dt L)[ U^n + dt*<exp(-sL)N(exp(sL)U^n)>_s]
-            average(U0, Average, positive=True, t=t)
-            Ustar.assign(U0 + dt*Average)
-            average(U0, Average, positive=False, t=t)
-            Ustar += dt*Average
+            get_dVdt(U0, dVdt, positive=True, t=t)
+            Ustar.assign(U0 + dt*dVdt)
+            get_dVdt(U0, dVdt, positive=False, t=t)
+            Ustar += dt*dVdt
             propagate(Ustar, Ustar, t=t)
             # compute U^{n+1} = (B^n + U^*)/2 + dt*<exp(-sL)N(exp(sL)U^*)>/2
             print("RK stage 2")
-            average(Ustar, Average, positive=True, t=t)
-            U1 += Ustar/2 + dt*Average/2
-            average(Ustar, Average, positive=False, t=t)
-            U1 += dt*Average/2
+            get_dVdt(Ustar, dVdt, positive=True, t=t)
+            U1 += Ustar/2 + dt*dVdt/2
+            get_dVdt(Ustar, dVdt, positive=False, t=t)
+            U1 += dt*dVdt/2
         # start all over again
         U0.assign(U1)
     elif timestepping == 'rk4':
         print("RK stage 1")
-        average(U0, Average, positive=True, t=t)
-        print("--average")
-        V1.assign(dt*Average)
-        average(U0, Average, positive=False, t=t)
-        print("--average")
-        V1 += dt*Average
+        average(U0, V1, t=t)
         U1.assign(U0 + V1/2)
 
         print("RK stage 2")
         propagate(U1, U1, t=t, half=True)
-        print("--propagate")
-        average(U1, Average, positive=True, t=t)
-        print("--average")
-        V2.assign(dt*Average)
-        average(U1, Average, positive=False, t=t)
-        print("--average")
-        V2 += dt*Average
+        average(U1, V2, t=t)
         propagate(U0, V, t=t, half=True)
-        print("--propagate")
         U2.assign(V + V2/2)
 
         print("RK stage 3")
-        average(U2, Average, positive=True, t=t)
-        print("--average")
-        V3.assign(dt*Average)
-        average(U2, Average, positive=False, t=t)
-        print("--average")
-        V3 += dt*Average
+        average(U2, V3, t=t)
         U3.assign(V + V3)
 
         print("RK stage 4")
         U1.assign(V2 + V3)
         propagate(U1, U2, t=t, half=True)
-        print("--propagate")
         propagate(U3, V3, t=t, half=True)
-        print("--propagate")
-        average(V3, Average, positive=True, t=t)
-        print("--average")
-        U3.assign(dt*Average)
-        average(V3, Average, positive=False, t=t)
-        print("--average")
-        U3 += dt*Average
+        average(V3, U3, t=t)
         propagate(V1, U1, t=t)
-        print("--propagate")
         propagate(U0, V, t=t)
-        print("--propagate")
         U0.assign(V + 1/6*U1 + 1/3*U2 + 1/6*U3)
 
     if args.dynamic_ubar:
