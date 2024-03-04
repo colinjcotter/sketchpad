@@ -558,7 +558,7 @@ if args.advection:
 
 XProbp = LinearVariationalProblem(lhs(Fp), rhs(Fp), X0,
                                   constant_jacobian=constant_jacobian)
-Xpsolver = LinearVariationalSolver(XProbp,
+Xpsolver_serial = LinearVariationalSolver(XProbp,
                                   solver_parameters = params)
 
 dt_ss = -dt_s
@@ -574,7 +574,7 @@ if args.advection:
 
 XProbm = LinearVariationalProblem(lhs(Fm), rhs(Fm), X0,
                                   constant_jacobian=constant_jacobian)
-Xmsolver = LinearVariationalSolver(XProbm,
+Xmsolver_serial = LinearVariationalSolver(XProbm,
                                   solver_parameters = params)
 
 if paradiag_n:
@@ -695,9 +695,15 @@ Average = Function(W)
 
 def average(V, Average, t=None):
     get_dVdt(V, dVdt, positive=True, t=t)
-    Average.assign(dt*dVdt)
+    w_k.assign(weights[0])
+    NSolver.solve()
+    Xpsolver_serial.solve()
+    Average.assign(dt*X0)
     get_dVdt(V, dVdt, positive=False, t=t)
-    Average += dt*dVdt
+    w_k.assign(weights[0])
+    NSolver.solve()
+    Xmsolver_serial.solve()
+    Average += dt*X0
 
 
 # Function to take in current state V and return dV/dt
@@ -747,7 +753,7 @@ def get_dVdt(V, dVdt, positive=True, t=None):
         Xall.bcast_field(-1, dVdt)
     else:
         X1.assign(0.)
-        for step in ProgressBar(f'average backward').iter(range(ns, -1, -1)):
+        for step in ProgressBar(f'average backward').iter(range(ns, 0, -1)):
             if paradiag_n:
                 Nall.bcast_field(step-1, N)
             else:
@@ -759,9 +765,9 @@ def get_dVdt(V, dVdt, positive=True, t=None):
             # propagate X back
             with PETSc.Log.Event("backward integration"):
                 if positive:
-                    Xpsolver.solve()
+                    Xpsolver_serial.solve()
                 else:
-                    Xmsolver.solve()
+                    Xmsolver_serial.solve()
             X1.assign(X0)
             if not paradiag_n:
                 # back propagate W
