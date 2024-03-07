@@ -35,6 +35,7 @@ parser.add_argument('--alphap', type=float, default=0.0001, help='Circulant coef
 parser.add_argument('--paradiag_dt', action="store_true", help='Use paradiag for propagate solve')
 parser.add_argument('--paradiag_fs', action="store_true", help='Use paradiag for forward scatter')
 parser.add_argument('--paradiag_n', action="store_true", help='Use paradiag for nonlinear operator')
+parser.add_argument('--paradiag_nf', action="store_true", help='Use paradiag for nonlinear operator and forward in serial by flipping')
 parser.add_argument('--paradiag_X', action="store_true", help='Use paradiag for backward gather')
 parser.add_argument('--constant_jacobian', action="store_true", help='Use constant_jacobian option for faster calculation')
 
@@ -46,6 +47,7 @@ timestepping = args.timestepping
 paradiag_dt = args.paradiag_dt
 paradiag_fs = args.paradiag_fs
 paradiag_n = args.paradiag_n
+paradiag_nf = args.paradiag_nf
 paradiag_X = args.paradiag_X
 
 print(args)
@@ -259,6 +261,7 @@ else:
 Wall = asQ.AllAtOnceFunction(ensemble, time_partition_t, W)
 Wallh = asQ.AllAtOnceFunction(ensemble, time_partition_t_half, W)
 Walls = asQ.AllAtOnceFunction(ensemble, time_partition_s, W)
+Walls_new = asQ.AllAtOnceFunction(ensemble, time_partition_s, W)
 Nall = asQ.AllAtOnceFunction(ensemble, time_partition_s, W)
 Nall_new = asQ.AllAtOnceFunction(ensemble, time_partition_s, W)
 Xall = asQ.AllAtOnceFunction(ensemble, time_partition_s, W)
@@ -605,6 +608,49 @@ if paradiag_n:
         Ftm += advection(uh, ubar, v, vector=True, upwind=False)
         Ftm += advection(Dh, ubar, phi, continuity=True, vector=False, upwind=False)
 
+if paradiag_nf:
+    w_k = Constant(1.0) # the weight
+    u, D = TrialFunctions(W)
+    nu, nD = split(N)
+
+    theta = Constant(0.5)
+    uh = (1-theta)*u + theta*u1 + (1-theta)*w_k*nu
+    Dh = (1-theta)*D + theta*D1 + (1-theta)*w_k*nD
+
+    dt_ss = dt_s
+    # positive s inward propagation
+    Fp = (
+        inner(v, u1 - u) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*Dh*div(v)
+        + phi*(D1 - D) + dt_ss*div(uh*H)*phi
+    )*dx
+    Fp += (inner(v, w_k*nu) + phi*w_k*nD)*dx
+    if args.advection:
+        # we are going backwards in time
+        Fp += dt_ss*advection(uh, ubar, v, upwind=True, vector=True)
+        Fp += dt_ss*advection(Dh, ubar, phi, continuity=True,
+                              upwind=True, vector=False)
+
+    XProbp = LinearVariationalProblem(lhs(Fp), rhs(Fp), X0,
+                                      constant_jacobian=constant_jacobian)
+    Xpsolver_nf = LinearVariationalSolver(XProbp,
+                                          solver_parameters = params)
+
+    dt_ss = -dt_s
+    # negative s inward propagation
+    Fm = (
+        inner(v, u1 - u) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*Dh*div(v)
+        + phi*(D1 - D) + dt_ss*div(uh*H)*phi
+    )*dx
+    Fm += (inner(v, w_k*nu) + phi*w_k*nD)*dx
+    if args.advection:
+        Fm += dt_ss*advection(uh, ubar, v, upwind=False, vector=True)
+        Fm += dt_ss*advection(Dh, ubar, phi, continuity=True,
+                              upwind=False, vector=False)
+
+    XProbm = LinearVariationalProblem(lhs(Fm), rhs(Fm), X0,
+                                      constant_jacobian=constant_jacobian)
+    Xmsolver_nf = LinearVariationalSolver(XProbm,
+                                          solver_parameters = params)
 
 
 if paradiag_X:
@@ -640,6 +686,10 @@ weights = weights/np.sum(weights)/2
 weights[0] *= 2
 
 print(weights)
+weights_r = []
+for i in weights[::-1]:
+    weights_r.append(i)
+print(weights_r)
 
 offset_list = []
 for i_rank in range(len(time_partition_s)):
@@ -728,24 +778,26 @@ def get_dVdt(V, dVdt, positive=True, t=None):
                     forwardm_expsolver.solve()
             W0.assign(W1)
 
-    # backwards gather
-    if paradiag_n:
+    if paradiag_n or paradiag_nf or paradiag_X:
         for step in range(time_partition_s[ensemble_rank]):
             # compute N and store them in Nall
             W1.assign(Walls[step])
             NSolver.solve()
             Nall[step].assign(N)
-            # compute RHS
-            step_W = Walls.transform_index(step, from_range='slice', to_range='window')
-            w_k.assign(weights[step_W+1])
-            if positive:
-                assemble(-Ftp, tensor=RHS[step])
-            else:
-                assemble(-Ftm, tensor=RHS[step])
+            if paradiag_X:
+                # compute RHS
+                step_W = Walls.transform_index(step, from_range='slice', to_range='window')
+                w_k.assign(weights[step_W+1])
+                if positive:
+                    assemble(-Ftp, tensor=RHS[step])
+                else:
+                    assemble(-Ftm, tensor=RHS[step])
 
+    # backwards gather
     if paradiag_X:
+        # solve backward process using paradiag
         Xall.zero()
-        # flip the data in Nall
+        # flip the data in RHS
         data_flip(RHS, RHS_new)
         # solve allatoncesolver with RHS in the option
         if positive:
@@ -753,17 +805,50 @@ def get_dVdt(V, dVdt, positive=True, t=None):
         else:
             Xmsolver.solve(rhs=RHS_new)
         Xall.bcast_field(-1, dVdt)
+    elif paradiag_n:
+        # solve backward process using Nall in serial
+        X1.assign(0.)
+        for step in ProgressBar(f'average backward').iter(range(ns, 0, -1)):
+            # set N, W1, w_k
+            Nall.bcast_field(step-1, N)
+            Walls.bcast_field(step-1, W1)
+            w_k.assign(weights[step])
+            # propagate X back
+            with PETSc.Log.Event("backward integration"):
+                if positive:
+                    Xpsolver_serial.solve()
+                else:
+                    Xmsolver_serial.solve()
+            X1.assign(X0)
+        # copy contents
+        dVdt.assign(X0)
+    elif paradiag_nf:
+        # solve backward process using Nall and flipping to solve forward in serial
+        X1.assign(0.)
+        # flip the data in Nall and Wall
+        data_flip(Nall, Nall_new)
+        data_flip(Walls, Walls_new)
+        for step in ProgressBar(f'average forward after flipping').iter(range(ns)):
+            # set N, W1, w_k
+            Nall_new.bcast_field(step, N)
+            Walls_new.bcast_field(step, W1)
+            w_k.assign(weights_r[step])
+            # propagate X back
+            with PETSc.Log.Event("backward integration"):
+                if positive:
+                    Xpsolver_nf.solve()
+                else:
+                    Xmsolver_nf.solve()
+            X1.assign(X0)
+        # copy contents
+        dVdt.assign(X0)
     else:
+        # solve backward process in serial without paradiag
         X1.assign(0.)
         for step in ProgressBar(f'average backward').iter(range(ns, 0, -1)):
             # compute N
             with PETSc.Log.Event("nonlinearity"):
-                if paradiag_n:
-                    Nall.bcast_field(step-1, N)
-                    Walls.bcast_field(step-1, W1)
-                else:
-                    NSolver.solve()
-
+                NSolver.solve()
             # propagate X back
             with PETSc.Log.Event("backward integration"):
                 w_k.assign(weights[step])
@@ -772,31 +857,16 @@ def get_dVdt(V, dVdt, positive=True, t=None):
                 else:
                     Xmsolver_serial.solve()
             X1.assign(X0)
-            if not paradiag_n:
-                # back propagate W
-                if step > 0:
-                    with PETSc.Log.Event("backward propagation ds"):
-                        if positive:
-                            backwardp_expsolver.solve()
-                        else:
-                            backwardm_expsolver.solve()
-                    W1.assign(W0)
+            # back propagate W
+            if step > 0:
+                with PETSc.Log.Event("backward propagation ds"):
+                    if positive:
+                        backwardp_expsolver.solve()
+                    else:
+                        backwardm_expsolver.solve()
+                W1.assign(W0)
         # copy contents
         dVdt.assign(X0)
-
-        # X1.assign(0.)
-        # # flip the data in Nall
-        # data_flip(Nall, Nall_new)
-        # for step in ProgressBar(f'average forward after flipping').iter(range(ns)):
-        #     Nall_new.bcast_field(step, N)
-        #     with PETSc.Log.Event("forward integration after flipping"):
-        #         if positive:
-        #             Xpsolver.solve()
-        #         else:
-        #             Xmsolver.solve()
-        #     X1.assign(X0)
-        # # copy contents
-        # dVdt.assign(X0)
 
 
 # Function to apply forward propagation in t
