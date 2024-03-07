@@ -637,8 +637,7 @@ weights = np.exp(-1.0/svals/(1.0-svals))
 weights[0] /= 2
 # renormalise and then half because once for each sign
 weights = weights/np.sum(weights)/2
-# include a 0 on the end
-#weights = np.concatenate((weights, [0]))
+weights[0] *= 2
 
 print(weights)
 
@@ -695,15 +694,16 @@ Average = Function(W)
 
 def average(V, Average, t=None):
     get_dVdt(V, dVdt, positive=True, t=t)
-    w_k.assign(weights[0])
-    NSolver.solve()
-    Xpsolver_serial.solve()
-    Average.assign(dt*X0)
+    W1.assign(dVdt)
+    backwardp_expsolver.solve()
+    Average.assign(dt*W0)
     get_dVdt(V, dVdt, positive=False, t=t)
-    w_k.assign(weights[0])
+    W1.assign(dVdt)
+    backwardm_expsolver.solve()
+    Average.assign(Average+dt*W0)
+    W1.assign(V)
     NSolver.solve()
-    Xmsolver_serial.solve()
-    Average += dt*X0
+    Average.assign(Average+dt*Constant(weights[0])*N)
 
 
 # Function to take in current state V and return dV/dt
