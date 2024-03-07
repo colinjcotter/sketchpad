@@ -731,11 +731,13 @@ def get_dVdt(V, dVdt, positive=True, t=None):
     # backwards gather
     if paradiag_n:
         for step in range(time_partition_s[ensemble_rank]):
+            # compute N and store them in Nall
             W1.assign(Walls[step])
-            step_W = Walls.transform_index(step, from_range='slice', to_range='window')
-            w_k.assign(weights[step_W+1])
             NSolver.solve()
             Nall[step].assign(N)
+            # compute RHS
+            step_W = Walls.transform_index(step, from_range='slice', to_range='window')
+            w_k.assign(weights[step_W+1])
             if positive:
                 assemble(-Ftp, tensor=RHS[step])
             else:
@@ -754,16 +756,17 @@ def get_dVdt(V, dVdt, positive=True, t=None):
     else:
         X1.assign(0.)
         for step in ProgressBar(f'average backward').iter(range(ns, 0, -1)):
-            if paradiag_n:
-                Nall.bcast_field(step-1, N)
-            else:
-                # compute N
-                with PETSc.Log.Event("nonlinearity"):
-                    w_k.assign(weights[step])
+            # compute N
+            with PETSc.Log.Event("nonlinearity"):
+                if paradiag_n:
+                    Nall.bcast_field(step-1, N)
+                    Walls.bcast_field(step-1, W1)
+                else:
                     NSolver.solve()
 
             # propagate X back
             with PETSc.Log.Event("backward integration"):
+                w_k.assign(weights[step])
                 if positive:
                     Xpsolver_serial.solve()
                 else:
