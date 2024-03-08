@@ -74,11 +74,6 @@ if nt % 2 == 1:
     print('nt is an odd number. exit')
     import sys; sys.exit()
 
-if paradiag_X:
-    if not paradiag_n:
-        print('pradiag_n needs to use paradiag_X. exit')
-        import sys; sys.exit()
-
 # print out ppp
 eigs = [0.003465, 0.007274, 0.014955] #maximum frequency for ref 3-5
 eig = eigs[ref_level-3]
@@ -420,6 +415,9 @@ def get_form_function(upwind=True):
 def form_mass(uu, up, vu, vp):
     return (inner(uu, vu) + up * vp) * dx
 
+def form_mass_r(uu, up, vu, vp):
+    return (inner(-uu, vu) + -up * vp) * dx
+
 theta = Constant(0.5)
 if paradiag_dt:
     ### === --- Set up the forward solver for dt propagation --- === ###
@@ -580,7 +578,7 @@ XProbm = LinearVariationalProblem(lhs(Fm), rhs(Fm), X0,
 Xmsolver_serial = LinearVariationalSolver(XProbm,
                                   solver_parameters = params)
 
-if paradiag_n:
+if paradiag_X:
     uh = (1-theta)*w_k*nu
     Dh = (1-theta)*w_k*nD
 
@@ -655,11 +653,11 @@ if paradiag_nf:
 
 if paradiag_X:
     Xpform = asQ.AllAtOnceForm(Xall, alpha*dt/ns, theta,
-                               form_mass, get_form_function(upwind=True))
+                               form_mass_r, get_form_function(upwind=True))
     Xpsolver = asQ.AllAtOnceSolver(Xpform, Xall,
                                    solver_parameters=solver_parameters_diag)
     Xmform = asQ.AllAtOnceForm(Xall, -alpha*dt/ns, theta,
-                               form_mass, get_form_function(upwind=False))
+                               form_mass_r, get_form_function(upwind=False))
     Xmsolver = asQ.AllAtOnceSolver(Xmform, Xall,
                                    solver_parameters=solver_parameters_diag)
 
