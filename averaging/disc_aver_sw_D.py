@@ -11,7 +11,7 @@ parser = argparse.ArgumentParser(description='Williamson 5 testcase for averaged
 parser.add_argument('--ref_level', type=int, default=3, help='Refinement level of icosahedral grid. Default 3.')
 parser.add_argument('--tmax', type=float, default=360, help='Final time in hours. Default 24x15=360.')
 parser.add_argument('--dumpt', type=float, default=6, help='Dump time in hours. Default 6.')
-parser.add_argument('--checkt', type=float, default=6, help='Create checkpointing file every checkt hours. Default 6.')
+parser.add_argument('--checkt', type=float, default=24, help='Create checkpointing file every checkt hours. Default 6.')
 parser.add_argument('--dt', type=float, default=0.5, help='Timestep in hours. Default 3.')
 parser.add_argument('--ns', type=int, default=4, help='Number of s steps in exponential approximation for average')
 parser.add_argument('--nt', type=int, default=4, help='Number of t steps in exponential approximation for time propagator')
@@ -588,7 +588,7 @@ if args.mass_check:
 
 # true svals goes from -rho*dt/2 to rho*dt/2
 # this is shifted to [0,1] and only compute the second half
-svals = 0.5 + np.arange(ns)/ns/2
+svals = 0.5 + np.arange(ns+1)/(ns+1)/2
 # don't include 1 because we'll get NaN
 weights = np.exp(-1.0/svals/(1.0-svals))
 # half the 0 point because it is counted twice
@@ -596,8 +596,6 @@ weights = np.exp(-1.0/svals/(1.0-svals))
 weights[0] /= 2
 # renormalise and then half because once for each sign
 weights = weights/np.sum(weights)/2
-# include a 0 on the end
-weights = np.concatenate((weights, [0]))
 
 print(weights)
 
