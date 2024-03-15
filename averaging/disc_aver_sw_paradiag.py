@@ -121,7 +121,7 @@ luparams = {
 
 monoparameters_ns = {
     #"snes_monitor": None,
-    "snes_lag_preconditioner": ns,
+    "snes_lag_preconditioner": -2,
     "snes_lag_preconditioner_persists": None,
     "mat_type": "matfree",
     "ksp_type": "gmres",
@@ -193,7 +193,12 @@ solver_parameters_diag = {
 }
 
 # setup parameters for paradiag solve (the number of windows is fixed to 1)
-solver_parameters_diag['diagfft_block_'+str(i)+'_'] = hparams
+if args.advection:
+    solver_parameters_diag['diagfft_block_'+str(i)+'_'] = monoparameters_ns
+    print('set monoparameters_ns as solver_parameters_diag')
+else:
+    solver_parameters_diag['diagfft_block_'+str(i)+'_'] = hparams
+    print('set hparams as solver_parameters_diag')
 
 PETSc.Sys.Print('### === --- Calculating parallel solution --- === ###')
 
@@ -653,11 +658,11 @@ if paradiag_nf:
 
 if paradiag_X:
     Xpform = asQ.AllAtOnceForm(Xall, alpha*dt/ns, theta,
-                               form_mass_r, get_form_function(upwind=True))
+                               form_mass, get_form_function(upwind=True))
     Xpsolver = asQ.AllAtOnceSolver(Xpform, Xall,
                                    solver_parameters=solver_parameters_diag)
     Xmform = asQ.AllAtOnceForm(Xall, -alpha*dt/ns, theta,
-                               form_mass_r, get_form_function(upwind=False))
+                               form_mass, get_form_function(upwind=False))
     Xmsolver = asQ.AllAtOnceSolver(Xmform, Xall,
                                    solver_parameters=solver_parameters_diag)
 
@@ -787,9 +792,9 @@ def get_dVdt(V, dVdt, positive=True, t=None):
                 step_W = Walls.transform_index(step, from_range='slice', to_range='window')
                 w_k.assign(weights[step_W+1])
                 if positive:
-                    assemble(-Ftp, tensor=RHS[step])
+                    assemble(Ftp, tensor=RHS[step])
                 else:
-                    assemble(-Ftm, tensor=RHS[step])
+                    assemble(Ftm, tensor=RHS[step])
 
     # backwards gather
     if paradiag_X:
