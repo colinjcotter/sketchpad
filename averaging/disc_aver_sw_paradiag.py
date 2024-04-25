@@ -167,9 +167,9 @@ solver_parameters_diag = {
         'stol': 1e-12,
     },
     'pc_type': 'python',
-    'pc_python_type': 'asQ.DiagFFTPC',
-    'diagfft_alpha': args.alphap,
-    'diagfft_state': 'linear',
+    'pc_python_type': 'asQ.CirculantPC',
+    'circulant_alpha': args.alphap,
+    'circulant_state': 'linear',
     'aaos_jacobian_state': 'linear',
 }
 
@@ -198,15 +198,15 @@ time_partition_s = [slice_length_s for _ in range(args.nslices)]
 # setup parameters for paradiag solve (the number of windows is fixed to 1)
 if args.advection:
     for i in range(sum(time_partition_t)):
-        # solver_parameters_diag['diagfft_block_'+str(i)+'_'] = luparams
+        # solver_parameters_diag['circulant_block_'+str(i)+'_'] = luparams
         # print('set luparams as solver_parameters_diag')
-        solver_parameters_diag['diagfft_block_'+str(i)+'_'] = monoparameters_ns
+        solver_parameters_diag['circulant_block_'+str(i)+'_'] = monoparameters_ns
         print('set monoparameters_ns as solver_parameters_diag')
 else:
     for i in range(sum(time_partition_t)):
-        solver_parameters_diag['diagfft_block_'+str(i)+'_'] = luparams
+        solver_parameters_diag['circulant_block_'+str(i)+'_'] = luparams
         print('set luparams as solver_parameters_diag')
-        # solver_parameters_diag['diagfft_block_'+str(i)+'_'] = monoparameters_ns
+        # solver_parameters_diag['circulant_block_'+str(i)+'_'] = monoparameters_ns
         # print('set monoparameters_ns as solver_parameters_diag')
 
 # setup ensemble
