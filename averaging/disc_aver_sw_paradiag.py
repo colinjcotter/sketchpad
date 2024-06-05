@@ -1,10 +1,10 @@
 from firedrake import *
 from firedrake.petsc import PETSc
+from firedrake.__future__ import interpolate
 from pyop2.mpi import MPI
 import asQ
 
 import numpy as np
-print = PETSc.Sys.Print
 
 ### === --- Setup command arguments --- === ###
 import argparse
@@ -13,7 +13,7 @@ parser.add_argument('--ref_level', type=int, default=3, help='Refinement level o
 parser.add_argument('--tmax', type=float, default=360, help='Final time in hours. Default 24x15=360.')
 parser.add_argument('--dumpt', type=float, default=6, help='Dump time in hours. Default 6.')
 parser.add_argument('--checkt', type=float, default=24, help='Create checkpointing file every checkt hours. Default 6.')
-parser.add_argument('--dt', type=float, default=0.5, help='Timestep in hours. Default 3.')
+parser.add_argument('--dt', type=float, default=0.5, help='Timestep in hours. Default 0.5')
 parser.add_argument('--ns', type=int, default=4, help='Number of s steps in exponential approximation for average')
 parser.add_argument('--nt', type=int, default=4, help='Number of t steps in exponential approximation for time propagator')
 parser.add_argument('--alpha', type=float, default=1, help='Averaging window width as a multiple of dt. Default 1.')
@@ -37,7 +37,7 @@ parser.add_argument('--constant_jacobian', action="store_true", help='Use consta
 # print out arguments
 args = parser.parse_known_args()
 args = args[0]
-print(args)
+PETSc.Sys.Print(args)
 
 # set arguments
 ref_level = args.ref_level
@@ -50,6 +50,7 @@ ns = args.ns
 nt = args.nt
 timestepping = args.timestepping
 theta = Constant(args.theta)
+name = args.filename
 
 # print out ds/dt steps per minimum wavelength
 eigs = [0.003465, 0.007274, 0.014955] #maximum frequency for ref 3-5
@@ -57,8 +58,8 @@ eig = eigs[ref_level-3]
 # if we are doing exp(tL) then minimum period is period of exp(it*eig)
 # which is 2*pi/eig
 min_period = 2*np.pi/eig
-print("ds steps per min wavelength", min_period/dts)
-print("dt steps per min wavelength", min_period/dt*nt)
+PETSc.Sys.Print("ds steps per min wavelength", min_period/dts)
+PETSc.Sys.Print("dt steps per min wavelength", min_period/dt*nt)
 
 # when --check is specified exit here
 if args.check:
@@ -154,6 +155,25 @@ monoparameters_nt = {
     #"patch_sub_pc_factor_shift_type": "nonzero",
 }
 
+from utils.hybridisation import HybridisedSCPC  # noqa: F401
+hybridscpc_parameters = {
+    "ksp_type": 'preonly',
+    "mat_type": "matfree",
+    "pc_type": "python",
+    "pc_python_type": f"{__name__}.HybridisedSCPC",
+    "hybridscpc_condensed_field": {
+        'ksp_type': 'preonly',
+        'pc_type': 'lu',
+        'pc_factor_mat_solver_type': 'mumps',
+        'snes': {  # reuse factorisation
+            'lag_jacobian': -2,
+            'lag_jacobian_persists': None,
+            'lag_preconditioner': -2,
+            'lag_preconditioner_persists': None,
+        }
+    }
+}
+
 atol = 1e-10
 rtol = 1e-8
 solver_parameters_diag = {
@@ -198,16 +218,14 @@ time_partition_s = [slice_length_s for _ in range(args.nslices)]
 # setup parameters for paradiag solve (the number of windows is fixed to 1)
 if args.advection:
     for i in range(sum(time_partition_t)):
-        # solver_parameters_diag['circulant_block_'+str(i)+'_'] = luparams
-        # print('set luparams as solver_parameters_diag')
         solver_parameters_diag['circulant_block_'+str(i)+'_'] = monoparameters_ns
-        print('set monoparameters_ns as solver_parameters_diag')
+        if i == 0:
+            PETSc.Sys.Print('set monoparameters_ns as solver_parameters_diag')
 else:
     for i in range(sum(time_partition_t)):
-        solver_parameters_diag['circulant_block_'+str(i)+'_'] = luparams
-        print('set luparams as solver_parameters_diag')
-        # solver_parameters_diag['circulant_block_'+str(i)+'_'] = monoparameters_ns
-        # print('set monoparameters_ns as solver_parameters_diag')
+        solver_parameters_diag['circulant_block_'+str(i)+'_'] = hybridscpc_parameters
+        if i == 0:
+            PETSc.Sys.Print('set hybridscpc_parameters as solver_parameters_diag')
 
 # setup ensemble
 ensemble = asQ.create_ensemble(time_partition_t)
@@ -216,16 +234,19 @@ ensemble_rank = ensemble.ensemble_comm.rank
 # set mesh and parameters for Williamsom 5 test
 R0 = 6371220.
 H0 = Constant(5960.)
-
 mesh_degree = 3
-mesh = IcosahedralSphereMesh(radius=R0,
-                             refinement_level=ref_level, degree=mesh_degree, comm=ensemble.comm)
 
-cx = SpatialCoordinate(mesh)
-mesh.init_cell_orientations(cx)
+if args.pickup:
+    # pickup the result when --pickup is specified
+    with CheckpointFile(name+".h5", 'r', comm=ensemble.comm) as checkpoint:
+        mesh = checkpoint.load_mesh("mesh")
+else:
+    mesh = IcosahedralSphereMesh(radius=R0,
+                                 refinement_level=ref_level, degree=mesh_degree, comm=ensemble.comm, name="mesh")
+    cx = SpatialCoordinate(mesh)
+    mesh.init_cell_orientations(cx)
 
 cx, cy, cz = SpatialCoordinate(mesh)
-
 outward_normals = interpolate(CellNormal(mesh),VectorFunctionSpace(mesh,"DG",mesh_degree))
 DG2 = VectorFunctionSpace(mesh, "DG", 2)
 outward_normals_appx = Function(DG2).interpolate(outward_normals)
@@ -272,9 +293,13 @@ eta_expr = - ((R0 * Omega * u_max + u_max*u_max/2.0)*(cz*cz/(R0*R0)))/g
 un = Function(V1, name="Velocity").project(u_expr)
 etan = Function(V2, name="Elevation").interpolate(eta_expr)
 if args.eta:
-    Dn = Function(V2, name="Elevation").interpolate(eta_expr)
+    Dn = Function(V2, name="Dn").interpolate(eta_expr)
 else:
     Dn = Function(V2, name="Depth").interpolate(eta_expr + H - b)
+
+# set uini, etaini for debug
+uini = Function(V1, name="Velocity0").project(u_expr)
+etaini = Function(V2, name="Elevation0").interpolate(eta_expr)
 
 # set ubar
 if args.advection:
@@ -567,7 +592,7 @@ weights[0] /= 2
 # renormalise and then half because once for each sign
 weights = weights/np.sum(weights)/2
 weights[0] *= 2
-print(weights)
+PETSc.Sys.Print("weights = ", weights)
 
 
 ### === --- Setup a function to flip data in parallel--- === ###
@@ -672,7 +697,7 @@ def propagate(V_in, V_out, t=None, half=False):
         Wall.bcast_field(-1, V_out)
 
 
-### === --- Prepare for starting the time loop --- === ###
+### === --- Get ready for the time loop --- === ###
 # set up parameters for time loop
 t = 0.
 tmax = 60.*60.*args.tmax
@@ -681,41 +706,50 @@ dumpt = args.dumpt*60.*60.
 checkt = args.checkt*60.*60.
 tdump = 0.
 tcheck = 0.
+idx = 0
+is_last_slice = Wall.layout.is_local(-1)
 
-# pickup the result when --pickup is specified
+if is_last_slice:
+    file_sw = output.VTKFile(name+'.pvd', mode="a", comm=ensemble.comm)
+
 if args.pickup:
-    chkfile = DumbCheckpoint(args.pickup_from, mode=FILE_READ, comm=ensemble.comm)
-    chkfile.load(un)
-    chkfile.load(etan)
-    t = chkfile.read_attribute("/", "time")
-    tdump = chkfile.read_attribute("/", "tdump")
-    tcheck = chkfile.read_attribute("/", "tcheck")
-    chkfile.close()
-    if args.eta:
-        Dn.assign(etan)
-    else:
-        Dn.assign(etan+H0-b)
+    # pickup the result when --pickup is specified
+    with CheckpointFile(name+".h5", 'r', comm=ensemble.comm) as checkpoint:
+        timestepping_history = checkpoint.get_timestepping_history(mesh, name="Velocity")
+        idx = len(timestepping_history["index"]) - 1
+        uini = checkpoint.load_function(mesh, "Velocity0")
+        etaini = checkpoint.load_function(mesh, "Elevation0")
+        un = checkpoint.load_function(mesh, "Velocity", idx=idx)
+        etan = checkpoint.load_function(mesh, "Elevation", idx=idx)
+        Dn = checkpoint.load_function(mesh, "Dn", idx=idx)
+        t = timestepping_history["time"][-1]
+        tdump = timestepping_history["tdump"][-1]
+        tcheck = timestepping_history["tcheck"][-1]
     if args.dynamic_ubar:
         projection_solver.solve()
         u, _ = Uproj.subfunctions
         ubar.assign(un + u)
-
-# write out initial fields
-name = args.filename
-is_last_slice = Wall.layout.is_local(-1)
-
-if is_last_slice:
-    file_sw = File(name+'.pvd', mode="a", comm=ensemble.comm)
-    if not args.pickup:
+else:
+    if is_last_slice:
+        # dump initial condition when --pickup is not specified
         file_sw.write(un, etan, b)
+        # create checkpoint file and save initial condition
+        with CheckpointFile(name+".h5", 'w', comm=ensemble.comm) as checkpoint:
+            checkpoint.save_mesh(mesh)
+            checkpoint.save_function(uini)
+            checkpoint.save_function(etaini)
+            checkpoint.save_function(un, idx=idx,
+                                     timestepping_info={"time": t, "tdump": tdump, "tcheck": tcheck})
+            checkpoint.save_function(etan, idx=idx,
+                                     timestepping_info={"time": t, "tdump": tdump, "tcheck": tcheck})
+            checkpoint.save_function(Dn, idx=idx,
+                                     timestepping_info={"time": t, "tdump": tdump, "tcheck": tcheck})
+            PETSc.Sys.Print("Checkpointed at t = ", t, "idx = ", idx, comm=ensemble.comm)
 
 # calculate norms for debug
-uini = Function(V1, name="Velocity0").project(u_expr)
-etaini = Function(V2, name="Elevation0").interpolate(eta_expr)
 etanorm = errornorm(etan, etaini)/norm(etaini)
 unorm = errornorm(un, uini, norm_type="Hdiv")/norm(uini, norm_type="Hdiv")
-print('etanorm', etanorm, 'unorm', unorm)
-
+PETSc.Sys.Print('etanorm', etanorm, 'unorm', unorm)
 
 ##############################################################################
 # Time loop
@@ -739,16 +773,16 @@ U_D.assign(Dn)
 # initial mass to calculate mass error for debug
 mass0 = assemble(U_D*dx)
 
-### === --- time loop --- === ###
-print ('tmax', tmax, 'dt', dt)
+### === --- start time loop --- === ###
+PETSc.Sys.Print ('tmax', tmax, 'dt', dt)
 while t < tmax - 0.5*dt:
-    print(t)
+    PETSc.Sys.Print(t)
     t += dt
     tdump += dt
     tcheck += dt
 
     if timestepping == 'heuns':
-        print("RK stage 1")
+        PETSc.Sys.Print("RK stage 1")
         propagate(U0, U1, t=t)
         if not args.linear:
             U1 /= 2
@@ -760,7 +794,7 @@ while t < tmax - 0.5*dt:
             Ustar += dt*dVdt
             propagate(Ustar, Ustar, t=t)
             # compute U^{n+1} = (B^n + U^*)/2 + dt*<exp(-sL)N(exp(sL)U^*)>/2
-            print("RK stage 2")
+            PETSc.Sys.Print("RK stage 2")
             get_dVdt(Ustar, dVdt, positive=True, t=t)
             U1 += Ustar/2 + dt*dVdt/2
             get_dVdt(Ustar, dVdt, positive=False, t=t)
@@ -768,21 +802,21 @@ while t < tmax - 0.5*dt:
         # start all over again
         U0.assign(U1)
     elif timestepping == 'rk4':
-        print("RK stage 1")
+        PETSc.Sys.Print("RK stage 1")
         average(U0, V1, t=t)
         U1.assign(U0 + V1/2)
 
-        print("RK stage 2")
+        PETSc.Sys.Print("RK stage 2")
         propagate(U1, U1, t=t, half=True)
         average(U1, V2, t=t)
         propagate(U0, V, t=t, half=True)
         U2.assign(V + V2/2)
 
-        print("RK stage 3")
+        PETSc.Sys.Print("RK stage 3")
         average(U2, V3, t=t)
         U3.assign(V + V3)
 
-        print("RK stage 4")
+        PETSc.Sys.Print("RK stage 4")
         U1.assign(V2 + V3)
         propagate(U1, U2, t=t, half=True)
         propagate(U3, V3, t=t, half=True)
@@ -795,7 +829,7 @@ while t < tmax - 0.5*dt:
         projection_solver.solve()
         u, _ = Uproj.subfunctions
         ubar.assign(un + u)
-    print("mass error", (mass0-assemble(U_D*dx))/Area)
+    PETSc.Sys.Print("mass error", (mass0-assemble(U_D*dx))/Area)
 
     #calculate norms for debug (every time step)
     un.assign(U_u)
@@ -806,27 +840,76 @@ while t < tmax - 0.5*dt:
         etan.assign(Dn-H0+b)
     etanorm = errornorm(etan, etaini)/norm(etaini)
     unorm = errornorm(un, uini, norm_type="Hdiv")/norm(uini, norm_type="Hdiv")
-    print('etanorm', etanorm, 'unorm', unorm)
+    PETSc.Sys.Print('etanorm', etanorm, 'unorm', unorm)
 
     #dump results every tdump hours
     if tdump > dumpt - dt*0.5:
         if is_last_slice:
             file_sw.write(un, etan, b)
         tdump -= dumpt
-        print("dumped results at t =", t)
+        PETSc.Sys.Print("dumped results at t =", t)
 
-    #create checkpointing file every tcheck hours
+    #checkpointing every tcheck hours
     if tcheck > checkt - dt*0.5:
-        thours = int(t/3600)
         tcheck -= checkt
+        idx += 1
         if is_last_slice:
-            chk = DumbCheckpoint(name+"_"+str(thours)+"h", mode=FILE_CREATE, comm=ensemble.comm)
-            chk.store(un)
-            chk.store(etan)
-            chk.write_attribute("/", "time", t)
-            chk.write_attribute("/", "tdump", tdump)
-            chk.write_attribute("/", "tcheck", tcheck)
-            chk.close()
-        print("checkpointed at t =", t)
+            with CheckpointFile(name+".h5", 'a', comm=ensemble.comm) as checkpoint:
+                checkpoint.save_function(un, idx=idx,
+                                         timestepping_info={"time": t, "tdump": tdump, "tcheck": tcheck})
+                checkpoint.save_function(etan, idx=idx,
+                                         timestepping_info={"time": t, "tdump": tdump, "tcheck": tcheck})
+                checkpoint.save_function(Dn, idx=idx,
+                                         timestepping_info={"time": t, "tdump": tdump, "tcheck": tcheck})
+        PETSc.Sys.Print("Checkpointed at t = ", t, "idx = ", idx)
 
-print("Completed calculation at t = ", t/3600, "hours")
+PETSc.Sys.Print("Completed calculation at t = ", t/3600, "hours")
+
+PETSc.Sys.Print("Test Checkpointing")
+testc = assemble(dot(un,un)*dx)
+PETSc.Sys.Print("testc = ", testc)
+etanorm = errornorm(etan, etaini)/norm(etaini)
+unorm = errornorm(un, uini, norm_type="Hdiv")/norm(uini, norm_type="Hdiv")
+PETSc.Sys.Print('etanorm', etanorm, 'unorm', unorm)
+
+# validate checkpointing
+if is_last_slice:
+    with CheckpointFile(name+".h5", 'r', comm=ensemble.comm) as checkpoint:
+        mesh = checkpoint.load_mesh("mesh")
+        uini = checkpoint.load_function(mesh, "Velocity0")
+        etaini = checkpoint.load_function(mesh, "Elevation0")
+        timestepping_history = checkpoint.get_timestepping_history(mesh, name="Velocity")
+
+        PETSc.Sys.Print("timestepping_history=", timestepping_history, comm=ensemble.comm)
+        PETSc.Sys.Print("timestepping_history_index=", timestepping_history["index"], comm=ensemble.comm)
+        PETSc.Sys.Print("timestepping_history_time=", timestepping_history["time"], comm=ensemble.comm)
+        PETSc.Sys.Print("timestepping_history_tdump=", timestepping_history["tdump"], comm=ensemble.comm)
+        PETSc.Sys.Print("timestepping_history_tcheck=", timestepping_history["tcheck"], comm=ensemble.comm)
+        PETSc.Sys.Print("timestepping_history_index_last=", timestepping_history["index"][-1], comm=ensemble.comm)
+        PETSc.Sys.Print("timestepping_history_time_last=", timestepping_history["time"][-1], comm=ensemble.comm)
+        PETSc.Sys.Print("timestepping_history_tdump_last=", timestepping_history["tdump"][-1], comm=ensemble.comm)
+        PETSc.Sys.Print("timestepping_history_tcheck_last=", timestepping_history["tcheck"][-1], comm=ensemble.comm)
+
+        for i in range(len(timestepping_history["time"])):
+            un = checkpoint.load_function(mesh, "Velocity", idx=i)
+            etan = checkpoint.load_function(mesh, "Elevation", idx=i)
+            Dn = checkpoint.load_function(mesh, "Dn", idx=i)
+            PETSc.Sys.Print("Picked up at idx = ", i, comm=ensemble.comm)
+
+            testc = assemble(dot(un,un)*dx)
+            PETSc.Sys.Print("testc = ", testc, comm=ensemble.comm)
+
+            etanorm = errornorm(etan, etaini)/norm(etaini)
+            unorm = errornorm(un, uini, norm_type="Hdiv")/norm(uini, norm_type="Hdiv")
+            PETSc.Sys.Print('etanorm', etanorm, 'unorm', unorm, comm=ensemble.comm)
+
+        last_index = len(timestepping_history["index"]) - 1
+        PETSc.Sys.Print("Picking up the last element. last index is", last_index, comm=ensemble.comm)
+        un = checkpoint.load_function(mesh, "Velocity", idx=last_index)
+        etan = checkpoint.load_function(mesh, "Elevation", idx=last_index)
+        Dn = checkpoint.load_function(mesh, "Dn", idx=last_index)
+        testc = assemble(dot(un,un)*dx)
+        PETSc.Sys.Print("testc = ", testc, comm=ensemble.comm)
+        etanorm = errornorm(etan, etaini)/norm(etaini)
+        unorm = errornorm(un, uini, norm_type="Hdiv")/norm(uini, norm_type="Hdiv")
+        PETSc.Sys.Print('etanorm', etanorm, 'unorm', unorm, comm=ensemble.comm)
