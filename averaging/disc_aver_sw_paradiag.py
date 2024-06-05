@@ -721,10 +721,13 @@ if args.pickup:
         etaini = checkpoint.load_function(mesh, "Elevation0")
         un = checkpoint.load_function(mesh, "Velocity", idx=idx)
         etan = checkpoint.load_function(mesh, "Elevation", idx=idx)
-        Dn = checkpoint.load_function(mesh, "Dn", idx=idx)
         t = timestepping_history["time"][-1]
         tdump = timestepping_history["tdump"][-1]
         tcheck = timestepping_history["tcheck"][-1]
+    if args.eta:
+        Dn.assign(etan)
+    else:
+        Dn.assign(etan+H0-b)
     if args.dynamic_ubar:
         projection_solver.solve()
         u, _ = Uproj.subfunctions
@@ -741,8 +744,6 @@ else:
             checkpoint.save_function(un, idx=idx,
                                      timestepping_info={"time": t, "tdump": tdump, "tcheck": tcheck})
             checkpoint.save_function(etan, idx=idx,
-                                     timestepping_info={"time": t, "tdump": tdump, "tcheck": tcheck})
-            checkpoint.save_function(Dn, idx=idx,
                                      timestepping_info={"time": t, "tdump": tdump, "tcheck": tcheck})
             PETSc.Sys.Print("Checkpointed at t = ", t, "idx = ", idx, comm=ensemble.comm)
 
@@ -859,8 +860,6 @@ while t < tmax - 0.5*dt:
                                          timestepping_info={"time": t, "tdump": tdump, "tcheck": tcheck})
                 checkpoint.save_function(etan, idx=idx,
                                          timestepping_info={"time": t, "tdump": tdump, "tcheck": tcheck})
-                checkpoint.save_function(Dn, idx=idx,
-                                         timestepping_info={"time": t, "tdump": tdump, "tcheck": tcheck})
         PETSc.Sys.Print("Checkpointed at t = ", t, "idx = ", idx)
 
 PETSc.Sys.Print("Completed calculation at t = ", t/3600, "hours")
@@ -893,7 +892,6 @@ if is_last_slice:
         for i in range(len(timestepping_history["time"])):
             un = checkpoint.load_function(mesh, "Velocity", idx=i)
             etan = checkpoint.load_function(mesh, "Elevation", idx=i)
-            Dn = checkpoint.load_function(mesh, "Dn", idx=i)
             PETSc.Sys.Print("Picked up at idx = ", i, comm=ensemble.comm)
 
             testc = assemble(dot(un,un)*dx)
@@ -907,7 +905,6 @@ if is_last_slice:
         PETSc.Sys.Print("Picking up the last element. last index is", last_index, comm=ensemble.comm)
         un = checkpoint.load_function(mesh, "Velocity", idx=last_index)
         etan = checkpoint.load_function(mesh, "Elevation", idx=last_index)
-        Dn = checkpoint.load_function(mesh, "Dn", idx=last_index)
         testc = assemble(dot(un,un)*dx)
         PETSc.Sys.Print("testc = ", testc, comm=ensemble.comm)
         etanorm = errornorm(etan, etaini)/norm(etaini)
