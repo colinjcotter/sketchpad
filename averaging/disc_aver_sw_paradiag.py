@@ -298,8 +298,9 @@ else:
     Dn = Function(V2, name="Depth").interpolate(eta_expr + H - b)
 
 # set uini, etaini for debug
-uini = Function(V1, name="Velocity0").project(u_expr)
-etaini = Function(V2, name="Elevation0").interpolate(eta_expr)
+uini = Function(V1, name="Velocity0").assign(un)
+etaini = Function(V2, name="Elevation0").assign(etan)
+Dnini = Function(V2, name="Dn0").assign(Dn)
 
 # set ubar
 if args.advection:
@@ -717,8 +718,6 @@ if args.pickup:
         timestepping_history = checkpoint.get_timestepping_history(mesh, name="Velocity")
         idx = len(timestepping_history["index"]) - 1
         PETSc.Sys.Print("Picking up the result from ", name+".h5,", "last index is", idx)
-        uini = checkpoint.load_function(mesh, "Velocity0")
-        etaini = checkpoint.load_function(mesh, "Elevation0")
         un = checkpoint.load_function(mesh, "Velocity", idx=idx)
         etan = checkpoint.load_function(mesh, "Elevation", idx=idx)
         t = timestepping_history["time"][-1]
@@ -740,8 +739,6 @@ else:
         # create checkpoint file and save initial condition
         with CheckpointFile(name+".h5", 'w', comm=ensemble.comm) as checkpoint:
             checkpoint.save_mesh(mesh)
-            checkpoint.save_function(uini)
-            checkpoint.save_function(etaini)
             checkpoint.save_function(un, idx=idx,
                                      timestepping_info={"time": t, "tdump": tdump, "tcheck": tcheck})
             checkpoint.save_function(etan, idx=idx,
@@ -752,6 +749,10 @@ else:
 etanorm = errornorm(etan, etaini)/norm(etaini)
 unorm = errornorm(un, uini, norm_type="Hdiv")/norm(uini, norm_type="Hdiv")
 PETSc.Sys.Print('etanorm', etanorm, 'unorm', unorm)
+
+# initial mass to calculate mass error for debug
+mass0 = assemble(Dnini*dx)
+PETSc.Sys.Print('initial mass', mass0)
 
 ##############################################################################
 # Time loop
@@ -772,13 +773,10 @@ U1_u, U1_D = U1.subfunctions
 U_u.assign(un)
 U_D.assign(Dn)
 
-# initial mass to calculate mass error for debug
-mass0 = assemble(U_D*dx)
-
 ### === --- start time loop --- === ###
 PETSc.Sys.Print ("Sarting the time loop. tmax = ", tmax)
 while t < tmax - 0.5*dt:
-    PETSc.Sys.Print("at start of time step at t = ", t, "dt = ", dt)
+    PETSc.Sys.Print("at the start of time step at t = ", t, ", dt = ", dt)
     t += dt
     tdump += dt
     tcheck += dt
@@ -872,14 +870,11 @@ etanorm = errornorm(etan, etaini)/norm(etaini)
 unorm = errornorm(un, uini, norm_type="Hdiv")/norm(uini, norm_type="Hdiv")
 PETSc.Sys.Print('etanorm', etanorm, 'unorm', unorm)
 
-# validate checkpointing
+#print out timestepping history in the checkpoint file for debug
 if is_last_slice:
     with CheckpointFile(name+".h5", 'r', comm=ensemble.comm) as checkpoint:
         mesh = checkpoint.load_mesh("mesh")
-        uini = checkpoint.load_function(mesh, "Velocity0")
-        etaini = checkpoint.load_function(mesh, "Elevation0")
         timestepping_history = checkpoint.get_timestepping_history(mesh, name="Velocity")
-
         PETSc.Sys.Print("timestepping_history=", timestepping_history, comm=ensemble.comm)
         PETSc.Sys.Print("timestepping_history_index=", timestepping_history["index"], comm=ensemble.comm)
         PETSc.Sys.Print("timestepping_history_time=", timestepping_history["time"], comm=ensemble.comm)
@@ -890,6 +885,8 @@ if is_last_slice:
         PETSc.Sys.Print("timestepping_history_tdump_last=", timestepping_history["tdump"][-1], comm=ensemble.comm)
         PETSc.Sys.Print("timestepping_history_tcheck_last=", timestepping_history["tcheck"][-1], comm=ensemble.comm)
 
+        uini = checkpoint.load_function(mesh, "Velocity", idx=0)
+        etaini = checkpoint.load_function(mesh, "Elevation", idx=0)
         for i in range(len(timestepping_history["time"])):
             un = checkpoint.load_function(mesh, "Velocity", idx=i)
             etan = checkpoint.load_function(mesh, "Elevation", idx=i)
@@ -902,12 +899,30 @@ if is_last_slice:
             unorm = errornorm(un, uini, norm_type="Hdiv")/norm(uini, norm_type="Hdiv")
             PETSc.Sys.Print('etanorm', etanorm, 'unorm', unorm, comm=ensemble.comm)
 
-        last_index = len(timestepping_history["index"]) - 1
-        PETSc.Sys.Print("Picking up the last element. last index is", last_index, comm=ensemble.comm)
-        un = checkpoint.load_function(mesh, "Velocity", idx=last_index)
-        etan = checkpoint.load_function(mesh, "Elevation", idx=last_index)
-        testc = assemble(dot(un,un)*dx)
-        PETSc.Sys.Print("testc = ", testc, comm=ensemble.comm)
-        etanorm = errornorm(etan, etaini)/norm(etaini)
-        unorm = errornorm(un, uini, norm_type="Hdiv")/norm(uini, norm_type="Hdiv")
-        PETSc.Sys.Print('etanorm', etanorm, 'unorm', unorm, comm=ensemble.comm)
+
+# with CheckpointFile(name+".h5", 'r', comm=ensemble.comm) as checkpoint:
+#     mesh = checkpoint.load_mesh("mesh")
+#     timestepping_history = checkpoint.get_timestepping_history(mesh, name="Velocity")
+#     PETSc.Sys.Print("timestepping_history=", timestepping_history)
+#     PETSc.Sys.Print("timestepping_history_index=", timestepping_history["index"])
+#     PETSc.Sys.Print("timestepping_history_time=", timestepping_history["time"])
+#     PETSc.Sys.Print("timestepping_history_tdump=", timestepping_history["tdump"])
+#     PETSc.Sys.Print("timestepping_history_tcheck=", timestepping_history["tcheck"])
+#     PETSc.Sys.Print("timestepping_history_index_last=", timestepping_history["index"][-1])
+#     PETSc.Sys.Print("timestepping_history_time_last=", timestepping_history["time"][-1])
+#     PETSc.Sys.Print("timestepping_history_tdump_last=", timestepping_history["tdump"][-1])
+#     PETSc.Sys.Print("timestepping_history_tcheck_last=", timestepping_history["tcheck"][-1])
+
+#     uini = checkpoint.load_function(mesh, "Velocity", idx=0)
+#     etaini = checkpoint.load_function(mesh, "Elevation", idx=0)
+#     for i in range(len(timestepping_history["time"])):
+#         un = checkpoint.load_function(mesh, "Velocity", idx=i)
+#         etan = checkpoint.load_function(mesh, "Elevation", idx=i)
+#         PETSc.Sys.Print("Picked up at idx = ", i)
+
+#         testc = assemble(dot(un,un)*dx)
+#         PETSc.Sys.Print("testc = ", testc)
+
+#         etanorm = errornorm(etan, etaini)/norm(etaini)
+#         unorm = errornorm(un, uini, norm_type="Hdiv")/norm(uini, norm_type="Hdiv")
+#         PETSc.Sys.Print('etanorm', etanorm, 'unorm', unorm)
