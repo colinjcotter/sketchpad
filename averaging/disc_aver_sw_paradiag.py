@@ -12,7 +12,7 @@ parser = argparse.ArgumentParser(description='Williamson 5 testcase for averaged
 parser.add_argument('--ref_level', type=int, default=3, help='Refinement level of icosahedral grid. Default 3.')
 parser.add_argument('--tmax', type=float, default=360, help='Final time in hours. Default 24x15=360.')
 parser.add_argument('--dumpt', type=float, default=6, help='Dump time in hours. Default 6.')
-parser.add_argument('--checkt', type=float, default=24, help='Create checkpointing file every checkt hours. Default 6.')
+parser.add_argument('--checkt', type=float, default=6, help='Create checkpointing file every checkt hours. Default 6.')
 parser.add_argument('--dt', type=float, default=0.5, help='Timestep in hours. Default 0.5')
 parser.add_argument('--ns', type=int, default=4, help='Number of s steps in exponential approximation for average')
 parser.add_argument('--nt', type=int, default=4, help='Number of t steps in exponential approximation for time propagator')
@@ -701,7 +701,6 @@ def propagate(V_in, V_out, t=None, half=False):
 # set up parameters for time loop
 t = 0.
 tmax = 60.*60.*args.tmax
-#tmax = dt
 dumpt = args.dumpt*60.*60.
 checkt = args.checkt*60.*60.
 tdump = 0.
@@ -717,6 +716,7 @@ if args.pickup:
     with CheckpointFile(name+".h5", 'r', comm=ensemble.comm) as checkpoint:
         timestepping_history = checkpoint.get_timestepping_history(mesh, name="Velocity")
         idx = len(timestepping_history["index"]) - 1
+        PETSc.Sys.Print("Picking up the result from ", name+".h5,", "last index is", idx)
         uini = checkpoint.load_function(mesh, "Velocity0")
         etaini = checkpoint.load_function(mesh, "Elevation0")
         un = checkpoint.load_function(mesh, "Velocity", idx=idx)
@@ -724,6 +724,7 @@ if args.pickup:
         t = timestepping_history["time"][-1]
         tdump = timestepping_history["tdump"][-1]
         tcheck = timestepping_history["tcheck"][-1]
+        PETSc.Sys.Print("Restart from t = ", t, ", tdump = ", tdump, ", tcheck = ", tcheck)
     if args.eta:
         Dn.assign(etan)
     else:
@@ -775,9 +776,9 @@ U_D.assign(Dn)
 mass0 = assemble(U_D*dx)
 
 ### === --- start time loop --- === ###
-PETSc.Sys.Print ('tmax', tmax, 'dt', dt)
+PETSc.Sys.Print ("Sarting the time loop. tmax = ", tmax)
 while t < tmax - 0.5*dt:
-    PETSc.Sys.Print(t)
+    PETSc.Sys.Print("at start of time step at t = ", t, "dt = ", dt)
     t += dt
     tdump += dt
     tcheck += dt
