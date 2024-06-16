@@ -50,3 +50,4 @@ solver_parameters = {
 
 solver = ensemble_tao_solver(rf, ensemble,
                              solver_parameters=solver_parameters)
+solver.solve()
