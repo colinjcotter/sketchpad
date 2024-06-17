@@ -44,10 +44,13 @@ ensemble_J = rf(xs)
 stop_annotating()
 
 solver_parameters = {
-    "tao_type": "cg",
-    "tao_cg_type": "pr"
+    "tao_type": "lmvm",
+    "tao_cg_type": "pr",
+    "tao_monitor": None,
+    "tao_converged_reason": None
 }
 
 solver = ensemble_tao_solver(rf, ensemble,
                              solver_parameters=solver_parameters)
 solver.solve()
+solver.tao.view()
