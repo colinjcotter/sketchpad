@@ -1,11 +1,19 @@
 from firedrake import *
 from firedrake.adjoint import *
 from nudging import ensemble_tao_solver
+from firedrake.petsc import PETSc
+from pyop2.mpi import MPI
+import logging
+logger = logging.getLogger()
+logger.disabled = True
+PETSc.Sys.popErrorHandler()
+
+size = MPI.COMM_WORLD.size
+PETSc.Sys.Print(size)
+ensemble = Ensemble(COMM_WORLD, size//2)
+rank = ensemble.ensemble_comm.rank
 
 continue_annotation()
-
-ensemble = Ensemble(COMM_WORLD, 2)
-rank = ensemble.ensemble_comm.rank
 mesh = UnitSquareMesh(20, 20, comm=ensemble.comm)
 V = FunctionSpace(mesh, "CG", 1)
 
@@ -54,6 +62,8 @@ solver_parameters = {
     "tao_monitor": None,
     "tao_converged_reason": None
 }
+
+ders = rf.derivative()
 
 solver = ensemble_tao_solver(rf, ensemble,
                              solver_parameters=solver_parameters)
