@@ -9,7 +9,6 @@ logger.disabled = True
 PETSc.Sys.popErrorHandler()
 
 size = MPI.COMM_WORLD.size
-PETSc.Sys.Print(size)
 ensemble = Ensemble(COMM_WORLD, size//2)
 rank = ensemble.ensemble_comm.rank
 
@@ -29,12 +28,15 @@ a = inner(grad(u), grad(v))*dx
 
 for i in range(n_Js[rank]):
     val = Js_offset[rank]+i+1
+    #print("i", i, "val", val, "offset", Js_offset[rank], "ensemble rank", rank)
     x = function.Function(V)
     L = x*v*dx
-    u = Function(V)
+    u0 = Function(V)
     bc = DirichletBC(V, Constant(val), "on_boundary")
-    solve(a == L, u, bcs=[bc])
-    J = assemble((u*u + x*x)*dx)
+    solve(a == L, u0, bcs=[bc])
+    print(rank, norm(u0), norm(x), "NOOORMM", val)
+    J = assemble((u0*u0 + x*x)*dx)
+    #print("i", i, "Jval", J, "offset", Js_offset[rank], "ensemble rank", rank)
     Js.append(J)
     Controls.append(Control(x))
     xs.append(x)
@@ -63,7 +65,13 @@ solver_parameters = {
     "tao_converged_reason": None
 }
 
+jval = rf(xs)
+print(jval, "val CJC", ensemble.ensemble_comm.rank,
+          ensemble.global_comm.rank)
 ders = rf.derivative()
+for i, der in enumerate(ders):
+    print(norm(der), i, "der CJC", ensemble.ensemble_comm.rank,
+          ensemble.global_comm.rank)
 
 solver = ensemble_tao_solver(rf, ensemble,
                              solver_parameters=solver_parameters)
