@@ -241,8 +241,8 @@ if args.pickup:
     with CheckpointFile(name+".h5", 'r', comm=ensemble.comm) as checkpoint:
         mesh = checkpoint.load_mesh("mesh")
 else:
-    mesh = IcosahedralSphereMesh(radius=R0,
-                                 refinement_level=ref_level, degree=mesh_degree, comm=ensemble.comm, name="mesh")
+    mesh = IcosahedralSphereMesh(radius=R0, refinement_level=ref_level,
+                                 degree=mesh_degree, comm=ensemble.comm, name="mesh")
     cx = SpatialCoordinate(mesh)
     mesh.init_cell_orientations(cx)
 
@@ -776,7 +776,7 @@ U_D.assign(Dn)
 ### === --- start time loop --- === ###
 PETSc.Sys.Print ("Sarting the time loop. tmax = ", tmax)
 while t < tmax - 0.5*dt:
-    PETSc.Sys.Print("at the start of time step at t = ", t, ", dt = ", dt)
+    PETSc.Sys.Print("at the start of time step at t = ", t, ", dt = ", dt, ", tmax = ", tmax)
     t += dt
     tdump += dt
     tcheck += dt

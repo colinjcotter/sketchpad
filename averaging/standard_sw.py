@@ -17,11 +17,10 @@ parser.add_argument('--checkt', type=float, default=6, help='Create checkpointin
 parser.add_argument('--dt', type=float, default=1800, help='Timestep for the standard model in seconds. Default 45.')
 parser.add_argument('--filename', type=str, default='standard')
 parser.add_argument('--pickup', action='store_true', help='Pickup the result from the checkpoint.')
-parser.add_argument('--pickup_from', type=str, default='standard')
 args = parser.parse_known_args()
 args = args[0]
 ref_level = args.ref_level
-filename = args.filename
+name = args.filename
 dt = args.dt
 print(args)
 
@@ -32,11 +31,19 @@ H = Constant(5960.)
 Omega = Constant(7.292e-5)  # rotation rate
 g = Constant(9.8)  # Gravitational constant
 mesh_degree = 3
-mesh = IcosahedralSphereMesh(radius=R0,
-                             refinement_level=ref_level, degree=mesh_degree)
-x = SpatialCoordinate(mesh)
-global_normal = as_vector([x[0], x[1], x[2]])
-mesh.init_cell_orientations(global_normal)
+
+if args.pickup:
+    # pickup the result when --pickup is specified
+    with CheckpointFile(name+".h5", 'r') as checkpoint:
+        mesh = checkpoint.load_mesh("mesh")
+        x = SpatialCoordinate(mesh)
+else:
+    mesh = IcosahedralSphereMesh(radius=R0, refinement_level=ref_level,
+                                 degree=mesh_degree, name="mesh")
+    x = SpatialCoordinate(mesh)
+    global_normal = as_vector([x[0], x[1], x[2]])
+    mesh.init_cell_orientations(global_normal)
+
 outward_normals = interpolate(CellNormal(mesh),VectorFunctionSpace(mesh,"DG",mesh_degree))
 perp = lambda u: cross(outward_normals, u)
 V1 = FunctionSpace(mesh, "BDM", 2)
@@ -69,32 +76,18 @@ dumpt = args.dumpt*60.*60.
 checkt = args.checkt*60.*60.
 tdump = 0.
 tcheck = 0.
+idx = 0
 k_max = 4        # Maximum number of Picard iterations
 
-#pickup the result
-if args.pickup:
-    chkfile = DumbCheckpoint(args.pickup_from, mode=FILE_READ)
-    un = Function(V1, name="Velocity")
-    hn = Function(V2, name="Depth")
-    chkfile.load(un, name="Velocity")
-    chkfile.load(hn, name="Depth")
-    etan = Function(V2, name="Elevation").assign(hn + b - H)
-    t = chkfile.read_attribute("/", "time")
-    tdump = chkfile.read_attribute("/", "tdump")
-    tcheck = chkfile.read_attribute("/", "tcheck")
-    chkfile.close()
-else:
-    un = Function(V1, name="Velocity").project(u_expr)
-    etan = Function(V2, name="Elevation").interpolate(eta_expr)
-    hn = Function(V2, name="Depth").interpolate(h_expr)
-    hn -= b
+#initiliase un, etan, hn
+un = Function(V1, name="Velocity").project(u_expr)
+etan = Function(V2, name="Elevation").interpolate(eta_expr)
+hn = Function(V2, name="Depth").interpolate(h_expr)
+hn -= b
 
-#calculate norms for debug
+#set uini, etaini for debug
 uini = Function(V1, name="Velocity0").project(u_expr)
 etaini = Function(V2, name="Elevation0").interpolate(eta_expr)
-etanorm = errornorm(etan, etaini)/norm(etaini)
-unorm = errornorm(un, uini, norm_type="Hdiv")/norm(uini, norm_type="Hdiv")
-print('etanorm', etanorm, 'unorm', unorm)
 
 #setup PV solver
 PV = Function(Vf, name="PotentialVorticity")
@@ -109,9 +102,9 @@ PVsolver.solve()
 
 #write out initial fields
 mesh_ll = get_latlon_mesh(mesh)
-global_normal = as_vector([0, 0, 1])
-mesh_ll.init_cell_orientations(global_normal)
-file_sw = output.VTKFile(filename+'.pvd', mode="a")
+global_normal_ll = as_vector([0, 0, 1])
+mesh_ll.init_cell_orientations(global_normal_ll)
+file_sw = output.VTKFile(name+'.pvd', mode="a")
 field_un = Function(
     functionspaceimpl.WithGeometry.create(un.function_space(), mesh_ll),
     val=un.topological)
@@ -124,8 +117,37 @@ field_PV = Function(
 field_b = Function(
     functionspaceimpl.WithGeometry.create(b.function_space(), mesh_ll),
     val=b.topological)
-if not args.pickup:
+
+if args.pickup:
+    # pickup the result when --pickup is specified
+    with CheckpointFile(name+".h5", 'r') as checkpoint:
+        timestepping_history = checkpoint.get_timestepping_history(mesh, name="Velocity")
+        idx = len(timestepping_history["index"]) - 1
+        PETSc.Sys.Print("Picking up the result from ", name+".h5,", "last index is", idx)
+        un = checkpoint.load_function(mesh, "Velocity", idx=idx)
+        etan = checkpoint.load_function(mesh, "Elevation", idx=idx)
+        t = timestepping_history["time"][-1]
+        tdump = timestepping_history["tdump"][-1]
+        tcheck = timestepping_history["tcheck"][-1]
+        print("Restart from t = ", t, ", tdump = ", tdump, ", tcheck = ", tcheck)
+    hn.assign(etan + H - b)
+else:
+    # dump initial condition when --pickup is not specified
     file_sw.write(field_un, field_etan, field_PV, field_b)
+    # create checkpoint file and save initial condition
+    with CheckpointFile(name+".h5", 'w') as checkpoint:
+        checkpoint.save_mesh(mesh)
+        checkpoint.save_function(un, idx=idx,
+                                 timestepping_info={"time": t, "tdump": tdump, "tcheck": tcheck})
+        checkpoint.save_function(etan, idx=idx,
+                                 timestepping_info={"time": t, "tdump": tdump, "tcheck": tcheck})
+        print("Checkpointed at t = ", t, "idx = ", idx)
+
+#calculate norms for debug
+etanorm = errornorm(etan, etaini)/norm(etaini)
+unorm = errornorm(un, uini, norm_type="Hdiv")/norm(uini, norm_type="Hdiv")
+print('etanorm', etanorm, 'unorm', unorm)
+
 
 ##############################################################################
 # Set up solvers
@@ -198,7 +220,7 @@ HUsolver = LinearVariationalSolver(HUproblem,
 #start time loop
 print('tmax', tmax, 'dt', dt)
 while t < tmax - 0.5*dt:
-    print(t)
+    print("at the start of time step at t = ", t, ", dt = ", dt, ", tmax = ", tmax)
     t += dt
     tdump += dt
     tcheck += dt
@@ -224,31 +246,63 @@ while t < tmax - 0.5*dt:
     hn.assign(hp)
     etan.assign(hn + b - H)
 
+    #calculate norms for debug
+    etanorm = errornorm(etan, etaini)/norm(etaini)
+    unorm = errornorm(un, uini, norm_type="Hdiv")/norm(uini, norm_type="Hdiv")
+    print('etanorm', etanorm, 'unorm', unorm)
+
     #dumping results
     if tdump > dumpt - dt*0.5:
         #dump results
         PVsolver.solve()
         file_sw.write(field_un, field_etan, field_PV, field_b)
-        #update dumpt
-        print("dumped at t =", t)
         tdump -= dumpt
+        print("dumped results at t =", t)
 
     #create checkpointing file every tcheck hours
     if tcheck > checkt - dt*0.5:
-        thours = int(t/3600)
-        chk = DumbCheckpoint(filename+"_"+str(thours)+"h", mode=FILE_CREATE)
         tcheck -= checkt
-        chk.store(un)
-        chk.store(hn)
-        chk.write_attribute("/", "time", t)
-        chk.write_attribute("/", "tdump", tdump)
-        chk.write_attribute("/", "tcheck", tcheck)
-        chk.close()
-        print("checkpointed at t =", t)
+        idx += 1
+        with CheckpointFile(name+".h5", 'a') as checkpoint:
+            checkpoint.save_function(un, idx=idx,
+                                     timestepping_info={"time": t, "tdump": tdump, "tcheck": tcheck})
+            checkpoint.save_function(etan, idx=idx,
+                                     timestepping_info={"time": t, "tdump": tdump, "tcheck": tcheck})
+        print("Checkpointed at t = ", t, "idx = ", idx)
 
-        #calculate norms for debug
+print("Completed calculation at t = ", t/3600, "hours")
+
+print("Test Checkpointing")
+testc = assemble(dot(un,un)*dx)
+print("testc = ", testc)
+etanorm = errornorm(etan, etaini)/norm(etaini)
+unorm = errornorm(un, uini, norm_type="Hdiv")/norm(uini, norm_type="Hdiv")
+print('etanorm', etanorm, 'unorm', unorm)
+
+#print out timestepping history in the checkpoint file for debug
+with CheckpointFile(name+".h5", 'r') as checkpoint:
+    mesh = checkpoint.load_mesh("mesh")
+    timestepping_history = checkpoint.get_timestepping_history(mesh, name="Velocity")
+    print("timestepping_history=", timestepping_history)
+    print("timestepping_history_index=", timestepping_history["index"])
+    print("timestepping_history_time=", timestepping_history["time"])
+    print("timestepping_history_tdump=", timestepping_history["tdump"])
+    print("timestepping_history_tcheck=", timestepping_history["tcheck"])
+    print("timestepping_history_index_last=", timestepping_history["index"][-1])
+    print("timestepping_history_time_last=", timestepping_history["time"][-1])
+    print("timestepping_history_tdump_last=", timestepping_history["tdump"][-1])
+    print("timestepping_history_tcheck_last=", timestepping_history["tcheck"][-1])
+
+    uini = checkpoint.load_function(mesh, "Velocity", idx=0)
+    etaini = checkpoint.load_function(mesh, "Elevation", idx=0)
+    for i in range(len(timestepping_history["time"])):
+        un = checkpoint.load_function(mesh, "Velocity", idx=i)
+        etan = checkpoint.load_function(mesh, "Elevation", idx=i)
+        print("Picked up at idx = ", i)
+
+        testc = assemble(dot(un,un)*dx)
+        print("testc = ", testc)
+
         etanorm = errornorm(etan, etaini)/norm(etaini)
         unorm = errornorm(un, uini, norm_type="Hdiv")/norm(uini, norm_type="Hdiv")
         print('etanorm', etanorm, 'unorm', unorm)
-
-print("Completed calculation at t = ", t/3600, "hours")
