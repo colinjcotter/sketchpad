@@ -1,7 +1,6 @@
 from firedrake import *
 from math import pi
 from math import ceil
-from latlon import *
 from firedrake.petsc import PETSc
 from firedrake.__future__ import interpolate
 import numpy as np
@@ -17,7 +16,6 @@ parser.add_argument('--checkt', type=float, default=6, help='Create checkpointin
 parser.add_argument('--dt', type=float, default=1800, help='Timestep for the standard model in seconds. Default 45.')
 parser.add_argument('--filename', type=str, default='standard')
 parser.add_argument('--pickup', action='store_true', help='Pickup the result from the checkpoint.')
-parser.add_argument('--latlon', action='store_true', help='Visualise on a latlon grid.')
 args = parser.parse_known_args()
 args = args[0]
 ref_level = args.ref_level
@@ -101,24 +99,7 @@ PVproblem = LinearVariationalProblem(a, L, PV)
 PVsolver = LinearVariationalSolver(PVproblem, solver_parameters={"ksp_type": "cg"})
 PVsolver.solve()
 
-#write out initial fields
-mesh_ll = get_latlon_mesh(mesh)
-global_normal_ll = as_vector([0, 0, 1])
-mesh_ll.init_cell_orientations(global_normal_ll)
 file_sw = output.VTKFile(name+'.pvd', mode="a")
-field_un = Function(
-    functionspaceimpl.WithGeometry.create(un.function_space(), mesh_ll),
-    val=un.topological)
-field_etan = Function(
-    functionspaceimpl.WithGeometry.create(etan.function_space(), mesh_ll),
-    val=etan.topological)
-field_PV = Function(
-    functionspaceimpl.WithGeometry.create(PV.function_space(), mesh_ll),
-    val=PV.topological)
-field_b = Function(
-    functionspaceimpl.WithGeometry.create(b.function_space(), mesh_ll),
-    val=b.topological)
-
 if args.pickup:
     # pickup the result when --pickup is specified
     with CheckpointFile(name+".h5", 'r') as checkpoint:
@@ -134,13 +115,11 @@ if args.pickup:
     hn.assign(etan + H - b)
 else:
     # dump initial condition when --pickup is not specified
-    if args.latlon:
-        file_sw.write(field_un, field_etan, field_PV, field_b)
-    else:
-        file_sw.write(un, etan, PV, b)
+    file_sw.write(un, etan, PV, b)
     # create checkpoint file and save initial condition
     with CheckpointFile(name+".h5", 'w') as checkpoint:
         checkpoint.save_mesh(mesh)
+        checkpoint.save_function(b)
         checkpoint.save_function(un, idx=idx,
                                  timestepping_info={"time": t, "tdump": tdump, "tcheck": tcheck})
         checkpoint.save_function(etan, idx=idx,
@@ -261,10 +240,7 @@ while t < tmax - 0.5*dt:
     if tdump > dumpt - dt*0.5:
         #dump results
         PVsolver.solve()
-        if args.latlon:
-            file_sw.write(field_un, field_etan, field_PV, field_b)
-        else:
-            file_sw.write(un, etan, PV, b)
+        file_sw.write(un, etan, PV, b)
         tdump -= dumpt
         print("dumped results at t =", t)
 
