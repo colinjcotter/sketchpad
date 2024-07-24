@@ -17,6 +17,7 @@ parser.add_argument('--checkt', type=float, default=6, help='Create checkpointin
 parser.add_argument('--dt', type=float, default=1800, help='Timestep for the standard model in seconds. Default 45.')
 parser.add_argument('--filename', type=str, default='standard')
 parser.add_argument('--pickup', action='store_true', help='Pickup the result from the checkpoint.')
+parser.add_argument('--latlon', action='store_true', help='Visualise on a latlon grid.')
 args = parser.parse_known_args()
 args = args[0]
 ref_level = args.ref_level
@@ -133,13 +134,18 @@ if args.pickup:
     hn.assign(etan + H - b)
 else:
     # dump initial condition when --pickup is not specified
-    file_sw.write(field_un, field_etan, field_PV, field_b)
+    if args.latlon:
+        file_sw.write(field_un, field_etan, field_PV, field_b)
+    else:
+        file_sw.write(un, etan, PV, b)
     # create checkpoint file and save initial condition
     with CheckpointFile(name+".h5", 'w') as checkpoint:
         checkpoint.save_mesh(mesh)
         checkpoint.save_function(un, idx=idx,
                                  timestepping_info={"time": t, "tdump": tdump, "tcheck": tcheck})
         checkpoint.save_function(etan, idx=idx,
+                                 timestepping_info={"time": t, "tdump": tdump, "tcheck": tcheck})
+        checkpoint.save_function(PV, idx=idx,
                                  timestepping_info={"time": t, "tdump": tdump, "tcheck": tcheck})
         print("Checkpointed at t = ", t, "idx = ", idx)
 
@@ -255,7 +261,10 @@ while t < tmax - 0.5*dt:
     if tdump > dumpt - dt*0.5:
         #dump results
         PVsolver.solve()
-        file_sw.write(field_un, field_etan, field_PV, field_b)
+        if args.latlon:
+            file_sw.write(field_un, field_etan, field_PV, field_b)
+        else:
+            file_sw.write(un, etan, PV, b)
         tdump -= dumpt
         print("dumped results at t =", t)
 
@@ -263,10 +272,13 @@ while t < tmax - 0.5*dt:
     if tcheck > checkt - dt*0.5:
         tcheck -= checkt
         idx += 1
+        PVsolver.solve()
         with CheckpointFile(name+".h5", 'a') as checkpoint:
             checkpoint.save_function(un, idx=idx,
                                      timestepping_info={"time": t, "tdump": tdump, "tcheck": tcheck})
             checkpoint.save_function(etan, idx=idx,
+                                     timestepping_info={"time": t, "tdump": tdump, "tcheck": tcheck})
+            checkpoint.save_function(PV, idx=idx,
                                      timestepping_info={"time": t, "tdump": tdump, "tcheck": tcheck})
         print("Checkpointed at t = ", t, "idx = ", idx)
 

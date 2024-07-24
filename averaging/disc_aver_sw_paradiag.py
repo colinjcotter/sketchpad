@@ -32,7 +32,6 @@ parser.add_argument('--pickup', action='store_true', help='Pickup the result fro
 parser.add_argument('--pickup_from', type=str, default='w2')
 parser.add_argument('--nslices', type=int, default=2, help='Number of time-slices per time-window.')
 parser.add_argument('--alphap', type=float, default=0.0001, help='Circulant coefficient.')
-parser.add_argument('--constant_jacobian', action="store_true", help='Use constant_jacobian option for faster calculation')
 
 # print out arguments
 args = parser.parse_known_args()
@@ -198,7 +197,7 @@ solver_parameters_diag = {
 if args.dynamic_ubar:
     constant_jacobian = False
 else:
-    constant_jacobian = args.constant_jacobian
+    constant_jacobian = True
 
 
 ### === --- Experimental setup for Williamson 5  --- === ###
@@ -697,6 +696,17 @@ def propagate(V_in, V_out, t=None, half=False):
         propagate_solver.solve()
         Wall.bcast_field(-1, V_out)
 
+### === --- Setup PV solver for visualisation --- === ###
+Vf = FunctionSpace(mesh, "CG", 3)
+PV = Function(Vf, name="PotentialVorticity")
+gamma = TestFunction(Vf)
+q = TrialFunction(Vf)
+Coriolis = Function(Vf).interpolate(f)
+a = q*gamma*(etan+H0-b)*dx
+L = (- inner(perp(grad(gamma)), un))*dx + gamma*Coriolis*dx
+PVproblem = LinearVariationalProblem(a, L, PV)
+PVsolver = LinearVariationalSolver(PVproblem, solver_parameters={"ksp_type": "cg"})
+
 
 ### === --- Get ready for the time loop --- === ###
 # set up parameters for time loop
@@ -735,13 +745,17 @@ if args.pickup:
 else:
     if is_last_slice:
         # dump initial condition when --pickup is not specified
-        file_sw.write(un, etan, b)
+        PVsolver.solve()
+        file_sw.write(un, etan, PV, b)
         # create checkpoint file and save initial condition
         with CheckpointFile(name+".h5", 'w', comm=ensemble.comm) as checkpoint:
             checkpoint.save_mesh(mesh)
+            checkpoint.save_function(b)
             checkpoint.save_function(un, idx=idx,
                                      timestepping_info={"time": t, "tdump": tdump, "tcheck": tcheck})
             checkpoint.save_function(etan, idx=idx,
+                                     timestepping_info={"time": t, "tdump": tdump, "tcheck": tcheck})
+            checkpoint.save_function(PV, idx=idx,
                                      timestepping_info={"time": t, "tdump": tdump, "tcheck": tcheck})
             PETSc.Sys.Print("Checkpointed at t = ", t, "idx = ", idx, comm=ensemble.comm)
 
@@ -845,7 +859,8 @@ while t < tmax - 0.5*dt:
     #dump results every tdump hours
     if tdump > dumpt - dt*0.5:
         if is_last_slice:
-            file_sw.write(un, etan, b)
+            PVsolver.solve()
+            file_sw.write(un, etan, PV, b)
         tdump -= dumpt
         PETSc.Sys.Print("dumped results at t =", t)
 
@@ -854,10 +869,13 @@ while t < tmax - 0.5*dt:
         tcheck -= checkt
         idx += 1
         if is_last_slice:
+            PVsolver.solve()
             with CheckpointFile(name+".h5", 'a', comm=ensemble.comm) as checkpoint:
                 checkpoint.save_function(un, idx=idx,
                                          timestepping_info={"time": t, "tdump": tdump, "tcheck": tcheck})
                 checkpoint.save_function(etan, idx=idx,
+                                         timestepping_info={"time": t, "tdump": tdump, "tcheck": tcheck})
+                checkpoint.save_function(PV, idx=idx,
                                          timestepping_info={"time": t, "tdump": tdump, "tcheck": tcheck})
         PETSc.Sys.Print("Checkpointed at t = ", t, "idx = ", idx)
 
