@@ -8,14 +8,24 @@ print = PETSc.Sys.Print
 parser = argparse.ArgumentParser(description='Comparing data in .h5 files and calculate norms.')
 parser.add_argument('--file0', type=str, default='file0')
 parser.add_argument('--file1', type=str, default='file1')
+parser.add_argument('--meshdir', type=str, default='meshdir')
 args = parser.parse_known_args()
 args = args[0]
 print(args)
 
 file0 = args.file0
 file1 = args.file1
+meshdir = args.meshdir
 
 print('calculate normalised norms in ' + file0 + " with respect to " + file1)
+
+print("\n")
+print("=== pickup mesh ===")
+#pickup mesh
+with CheckpointFile(meshdir+"/mesh.h5", 'r') as checkpoint:
+    mesh = checkpoint.load_mesh("mesh")
+    x = SpatialCoordinate(mesh)
+    print("Picked up the mesh from mesh.h5")
 
 print("\n")
 print("=== content in " + file0 + " ===")
@@ -58,11 +68,11 @@ for i in range(min(length0, length1)):
     print("Picking up the results at t = ", timestepping_history0["time"][i])
     #calculate norms
     with CheckpointFile(file0+".h5", 'r') as checkpoint0:
-        un0 = checkpoint0.load_function(mesh0, "Velocity", idx=i)
-        etan0 = checkpoint0.load_function(mesh0, "Elevation", idx=i)
+        un0 = checkpoint0.load_function(mesh, "Velocity", idx=i)
+        etan0 = checkpoint0.load_function(mesh, "Elevation", idx=i)
     with CheckpointFile(file1+".h5", 'r') as checkpoint1:
-        un1 = checkpoint1.load_function(mesh0, "Velocity", idx=i)
-        etan1 = checkpoint1.load_function(mesh0, "Elevation", idx=i)
+        un1 = checkpoint1.load_function(mesh, "Velocity", idx=i)
+        etan1 = checkpoint1.load_function(mesh, "Elevation", idx=i)
 
     etanorm = errornorm(etan0, etan1)/norm(etan1)
     unorm = errornorm(un0, un1, norm_type="Hdiv")/norm(un1, norm_type="Hdiv")
