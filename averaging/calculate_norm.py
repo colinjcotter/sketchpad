@@ -8,7 +8,7 @@ print = PETSc.Sys.Print
 parser = argparse.ArgumentParser(description='Comparing data in .h5 files and calculate norms.')
 parser.add_argument('--file0', type=str, default='file0')
 parser.add_argument('--file1', type=str, default='file1')
-parser.add_argument('--meshdir', type=str, default='meshdir')
+parser.add_argument('--meshdir', type=str, default='.')
 args = parser.parse_known_args()
 args = args[0]
 print(args)
@@ -43,6 +43,10 @@ with CheckpointFile(file0+".h5", 'r') as checkpoint0:
     print("timestepping_history_tdump_last = ", timestepping_history0["tdump"][-1])
     print("timestepping_history_tcheck_last = ", timestepping_history0["tcheck"][-1])
 
+    un = checkpoint0.load_function(mesh, "Velocity", idx=0)
+    testc0 = assemble(dot(un,un)*dx)
+    print("testc0 = ", testc0)
+
 print("\n")
 print("=== content in " + file1 + " ===")
 with CheckpointFile(file1+".h5", 'r') as checkpoint1:
@@ -58,6 +62,10 @@ with CheckpointFile(file1+".h5", 'r') as checkpoint1:
     print("timestepping_history_time_last = ", timestepping_history1["time"][-1])
     print("timestepping_history_tdump_last = ", timestepping_history1["tdump"][-1])
     print("timestepping_history_tcheck_last = ", timestepping_history1["tcheck"][-1])
+
+    un = checkpoint1.load_function(mesh, "Velocity", idx=0)
+    testc1 = assemble(dot(un,un)*dx)
+    print("testc1 = ", testc1)
     
 print("\n")
 print("=== calculate normalised norms in " + file0 + " with respect to " + file1 + " ===")
@@ -77,8 +85,8 @@ for i in range(min(length0, length1)):
     etanorm = errornorm(etan0, etan1)/norm(etan1)
     unorm = errornorm(un0, un1, norm_type="Hdiv")/norm(un1, norm_type="Hdiv")
     print('etanorm', etanorm, 'unorm', unorm)
-    etanorm_list.append(etanorm)
-    unorm_list.append(unorm)
+    etanorm_list.append(Constant(etanorm))
+    unorm_list.append(Constant(unorm))
 
 print("etanorm_list = ", etanorm_list)
 print("unorm_list = ", unorm_list)

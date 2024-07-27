@@ -19,7 +19,7 @@ parser.add_argument('--nt', type=int, default=4, help='Number of t steps in expo
 parser.add_argument('--alpha', type=float, default=1, help='Averaging window width as a multiple of dt. Default 1.')
 parser.add_argument('--theta', type=float, default=0.5, help='theta for clank nicolson')
 parser.add_argument('--filename', type=str, default='w2', help='filename for pvd')
-parser.add_argument('--meshdir', type=str, default='meshdir')
+parser.add_argument('--meshdir', type=str, default='.')
 parser.add_argument('--check', action="store_true", help='print out some information about frequency resolution and exit')
 parser.add_argument('--advection', action="store_true", help='include mean flow advection in L.')
 parser.add_argument('--dynamic_ubar', action="store_true", help='Use un as ubar.')
