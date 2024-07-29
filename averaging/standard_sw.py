@@ -17,6 +17,7 @@ parser.add_argument('--dt', type=float, default=1800, help='Timestep for the sta
 parser.add_argument('--filename', type=str, default='standard')
 parser.add_argument('--meshdir', type=str, default='.')
 parser.add_argument('--pickup', action='store_true', help='Pickup the result from the checkpoint.')
+parser.add_argument('--pickup_mesh', action='store_true', help='Pickup the mesh from the checkpoint.')
 
 args = parser.parse_known_args()
 args = args[0]
@@ -34,11 +35,20 @@ Omega = Constant(7.292e-5)  # rotation rate
 g = Constant(9.8)  # Gravitational constant
 mesh_degree = 3
 
-#pickup mesh
-with CheckpointFile(meshdir+"/mesh.h5", 'r') as checkpoint:
-    mesh = checkpoint.load_mesh("mesh")
+if args.pickup_mesh:
+    #pickup mesh
+    with CheckpointFile(meshdir+"/mesh.h5", 'r') as checkpoint:
+        mesh = checkpoint.load_mesh("mesh")
+        x = SpatialCoordinate(mesh)
+        print("Picked up the mesh from mesh.h5")
+else:
+    #create mesh
+    mesh = IcosahedralSphereMesh(radius=R0, refinement_level=ref_level,
+                                 degree=mesh_degree, name="mesh")
     x = SpatialCoordinate(mesh)
-    print("Picked up the mesh from mesh.h5")
+    global_normal = as_vector([x[0], x[1], x[2]])
+    mesh.init_cell_orientations(global_normal)
+    print("Created mesh")
 
 outward_normals = interpolate(CellNormal(mesh),VectorFunctionSpace(mesh,"DG",mesh_degree))
 perp = lambda u: cross(outward_normals, u)

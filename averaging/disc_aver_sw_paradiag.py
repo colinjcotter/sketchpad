@@ -33,6 +33,7 @@ parser.add_argument('--pickup', action='store_true', help='Pickup the result fro
 parser.add_argument('--pickup_from', type=str, default='w2')
 parser.add_argument('--nslices', type=int, default=2, help='Number of time-slices per time-window.')
 parser.add_argument('--alphap', type=float, default=0.0001, help='Circulant coefficient.')
+parser.add_argument('--pickup_mesh', action='store_true', help='Pickup the mesh from the checkpoint.')
 
 # print out arguments
 args = parser.parse_known_args()
@@ -237,10 +238,18 @@ R0 = 6371220.
 H0 = Constant(5960.)
 mesh_degree = 3
 
-# pickup mesh
-with CheckpointFile(meshdir+"/mesh.h5", 'r', comm=ensemble.comm) as checkpoint:
-    mesh = checkpoint.load_mesh("mesh")
-    PETSc.Sys.Print("Picked up the mesh from mesh.h5")
+if args.pickup_mesh:
+    # pickup mesh
+    with CheckpointFile(meshdir+"/mesh.h5", 'r', comm=ensemble.comm) as checkpoint:
+        mesh = checkpoint.load_mesh("mesh")
+        PETSc.Sys.Print("Picked up the mesh from mesh.h5")
+else:
+    # create mesh
+    mesh = IcosahedralSphereMesh(radius=R0, refinement_level=ref_level,
+                                 degree=mesh_degree, name="mesh", comm=ensemble.comm)
+    cx = SpatialCoordinate(mesh)
+    mesh.init_cell_orientations(cx)
+    PETSc.Sys.Print("Created mesh")
 
 cx, cy, cz = SpatialCoordinate(mesh)
 outward_normals = interpolate(CellNormal(mesh),VectorFunctionSpace(mesh,"DG",mesh_degree))

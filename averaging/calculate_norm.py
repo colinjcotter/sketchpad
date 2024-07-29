@@ -9,6 +9,7 @@ parser = argparse.ArgumentParser(description='Comparing data in .h5 files and ca
 parser.add_argument('--file0', type=str, default='file0')
 parser.add_argument('--file1', type=str, default='file1')
 parser.add_argument('--meshdir', type=str, default='.')
+parser.add_argument('--pickup_mesh', action='store_true', help='Pickup the mesh from the checkpoint.')
 args = parser.parse_known_args()
 args = args[0]
 print(args)
@@ -19,13 +20,14 @@ meshdir = args.meshdir
 
 print('calculate normalised norms in ' + file0 + " with respect to " + file1)
 
-print("\n")
-print("=== pickup mesh ===")
-#pickup mesh
-with CheckpointFile(meshdir+"/mesh.h5", 'r') as checkpoint:
-    mesh = checkpoint.load_mesh("mesh")
-    x = SpatialCoordinate(mesh)
-    print("Picked up the mesh from mesh.h5")
+if args.pickup_mesh:
+    print("\n")
+    print("=== pickup mesh ===")
+    #pickup mesh
+    with CheckpointFile(meshdir+"/mesh.h5", 'r') as checkpoint:
+        mesh = checkpoint.load_mesh("mesh")
+        x = SpatialCoordinate(mesh)
+        print("Picked up the mesh from mesh.h5")
 
 print("\n")
 print("=== content in " + file0 + " ===")
@@ -43,7 +45,7 @@ with CheckpointFile(file0+".h5", 'r') as checkpoint0:
     print("timestepping_history_tdump_last = ", timestepping_history0["tdump"][-1])
     print("timestepping_history_tcheck_last = ", timestepping_history0["tcheck"][-1])
 
-    un = checkpoint0.load_function(mesh, "Velocity", idx=0)
+    un = checkpoint0.load_function(mesh0, "Velocity", idx=0)
     testc0 = assemble(dot(un,un)*dx)
     print("testc0 = ", testc0)
 
@@ -63,7 +65,7 @@ with CheckpointFile(file1+".h5", 'r') as checkpoint1:
     print("timestepping_history_tdump_last = ", timestepping_history1["tdump"][-1])
     print("timestepping_history_tcheck_last = ", timestepping_history1["tcheck"][-1])
 
-    un = checkpoint1.load_function(mesh, "Velocity", idx=0)
+    un = checkpoint1.load_function(mesh1, "Velocity", idx=0)
     testc1 = assemble(dot(un,un)*dx)
     print("testc1 = ", testc1)
     
@@ -76,11 +78,19 @@ for i in range(min(length0, length1)):
     print("Picking up the results at t = ", timestepping_history0["time"][i])
     #calculate norms
     with CheckpointFile(file0+".h5", 'r') as checkpoint0:
-        un0 = checkpoint0.load_function(mesh, "Velocity", idx=i)
-        etan0 = checkpoint0.load_function(mesh, "Elevation", idx=i)
+        if args.pickup_mesh:
+            un0 = checkpoint0.load_function(mesh, "Velocity", idx=i)
+            etan0 = checkpoint0.load_function(mesh, "Elevation", idx=i)
+        else:
+            un0 = checkpoint0.load_function(mesh0, "Velocity", idx=i)
+            etan0 = checkpoint0.load_function(mesh0, "Elevation", idx=i)
     with CheckpointFile(file1+".h5", 'r') as checkpoint1:
-        un1 = checkpoint1.load_function(mesh, "Velocity", idx=i)
-        etan1 = checkpoint1.load_function(mesh, "Elevation", idx=i)
+        if args.pickup_mesh:
+            un1 = checkpoint1.load_function(mesh, "Velocity", idx=i)
+            etan1 = checkpoint1.load_function(mesh, "Elevation", idx=i)
+        else:
+            un1 = checkpoint1.load_function(mesh0, "Velocity", idx=i)
+            etan1 = checkpoint1.load_function(mesh0, "Elevation", idx=i)
 
     etanorm = errornorm(etan0, etan1)/norm(etan1)
     unorm = errornorm(un0, un1, norm_type="Hdiv")/norm(un1, norm_type="Hdiv")
