@@ -95,8 +95,8 @@ for i in range(min(length0, length1)):
     etanorm = errornorm(etan0, etan1)/norm(etan1)
     unorm = errornorm(un0, un1, norm_type="Hdiv")/norm(un1, norm_type="Hdiv")
     print('etanorm', etanorm, 'unorm', unorm)
-    etanorm_list.append(Constant(etanorm))
-    unorm_list.append(Constant(unorm))
+    etanorm_list.append(float(etanorm))
+    unorm_list.append(float(unorm))
 
 print("etanorm_list = ", etanorm_list)
 print("unorm_list = ", unorm_list)
