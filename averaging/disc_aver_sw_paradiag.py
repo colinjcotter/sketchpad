@@ -19,7 +19,6 @@ parser.add_argument('--nt', type=int, default=4, help='Number of t steps in expo
 parser.add_argument('--alpha', type=float, default=1, help='Averaging window width as a multiple of dt. Default 1.')
 parser.add_argument('--theta', type=float, default=0.5, help='theta for clank nicolson')
 parser.add_argument('--filename', type=str, default='w2', help='filename for pvd')
-parser.add_argument('--meshdir', type=str, default='.')
 parser.add_argument('--check', action="store_true", help='print out some information about frequency resolution and exit')
 parser.add_argument('--advection', action="store_true", help='include mean flow advection in L.')
 parser.add_argument('--dynamic_ubar', action="store_true", help='Use un as ubar.')
@@ -52,7 +51,6 @@ nt = args.nt
 timestepping = args.timestepping
 theta = Constant(args.theta)
 name = args.filename
-meshdir = args.meshdir
 
 # print out ds/dt steps per minimum wavelength
 eigs = [0.003465, 0.007274, 0.014955] #maximum frequency for ref 3-5
@@ -238,11 +236,11 @@ R0 = 6371220.
 H0 = Constant(5960.)
 mesh_degree = 3
 
-if args.pickup_mesh:
-    # pickup mesh
-    with CheckpointFile(meshdir+"/mesh.h5", 'r', comm=ensemble.comm) as checkpoint:
+if args.pickup:
+    # pickup the mesh when --pickup is specified
+    with CheckpointFile(name+".h5", 'r', comm=ensemble.comm) as checkpoint:
         mesh = checkpoint.load_mesh("mesh")
-        PETSc.Sys.Print("Picked up the mesh from mesh.h5")
+        PETSc.Sys.Print("Picked up the mesh from "+name+".h5")
 else:
     # create mesh
     mesh = IcosahedralSphereMesh(radius=R0, refinement_level=ref_level,

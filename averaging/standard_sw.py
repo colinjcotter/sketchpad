@@ -15,7 +15,6 @@ parser.add_argument('--dumpt', type=float, default=6, help='Dump time in hours. 
 parser.add_argument('--checkt', type=float, default=6, help='Create checkpointing file every checkt hours. Default 6.')
 parser.add_argument('--dt', type=float, default=1800, help='Timestep for the standard model in seconds. Default 45.')
 parser.add_argument('--filename', type=str, default='standard')
-parser.add_argument('--meshdir', type=str, default='.')
 parser.add_argument('--pickup', action='store_true', help='Pickup the result from the checkpoint.')
 parser.add_argument('--pickup_mesh', action='store_true', help='Pickup the mesh from the checkpoint.')
 
@@ -23,7 +22,6 @@ args = parser.parse_known_args()
 args = args[0]
 ref_level = args.ref_level
 name = args.filename
-meshdir = args.meshdir
 dt = args.dt
 print(args)
 
@@ -35,12 +33,12 @@ Omega = Constant(7.292e-5)  # rotation rate
 g = Constant(9.8)  # Gravitational constant
 mesh_degree = 3
 
-if args.pickup_mesh:
-    #pickup mesh
-    with CheckpointFile(meshdir+"/mesh.h5", 'r') as checkpoint:
+if args.pickup:
+    # pickup the mesh when --pickup is specified
+    with CheckpointFile(name+".h5", 'r') as checkpoint:
         mesh = checkpoint.load_mesh("mesh")
         x = SpatialCoordinate(mesh)
-        print("Picked up the mesh from mesh.h5")
+        print("Picked up the mesh from "+name+".h5")
 else:
     #create mesh
     mesh = IcosahedralSphereMesh(radius=R0, refinement_level=ref_level,
