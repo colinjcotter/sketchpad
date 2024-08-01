@@ -29,7 +29,6 @@ parser.add_argument('--linear_velocity', action='store_true', help='Drop the vel
 parser.add_argument('--linear_height', action='store_true', help='Drop the height advection from N.')
 parser.add_argument('--timestepping', type=str, default='rk4', choices=['rk4', 'heuns'], help='Choose a time steeping method. Default heuns.')
 parser.add_argument('--pickup', action='store_true', help='Pickup the result from the checkpoint.')
-parser.add_argument('--pickup_from', type=str, default='w2')
 parser.add_argument('--nslices', type=int, default=2, help='Number of time-slices per time-window.')
 parser.add_argument('--alphap', type=float, default=0.0001, help='Circulant coefficient.')
 parser.add_argument('--pickup_mesh', action='store_true', help='Pickup the mesh from the checkpoint.')
