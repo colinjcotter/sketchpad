@@ -11,7 +11,7 @@ import argparse
 parser = argparse.ArgumentParser(description='Williamson 5 testcase for averaged propagator using D (thickness) as the pressure variable.')
 parser.add_argument('--ref_level', type=int, default=3, help='Refinement level of icosahedral grid. Default 3.')
 parser.add_argument('--tmax', type=float, default=360, help='Final time in hours. Default 24x15=360.')
-parser.add_argument('--dumpt', type=float, default=6, help='Dump time in hours. Default 6.')
+parser.add_argument('--dumpt', type=float, default=24, help='Dump time in hours. Default 6.')
 parser.add_argument('--checkt', type=float, default=6, help='Create checkpointing file every checkt hours. Default 6.')
 parser.add_argument('--dt', type=float, default=0.5, help='Timestep in hours. Default 0.5')
 parser.add_argument('--ns', type=int, default=4, help='Number of s steps in exponential approximation for average')

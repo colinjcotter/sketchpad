@@ -30,7 +30,7 @@ if args.pickup_mesh:
         print("Picked up the mesh from mesh.h5")
 
 print("\n")
-print("=== content in " + file0 + " ===")
+print("=== content in " + file0 + ".h5 ===")
 with CheckpointFile(file0+".h5", 'r') as checkpoint0:
     mesh0 = checkpoint0.load_mesh("mesh")
     timestepping_history0 = checkpoint0.get_timestepping_history(mesh0, name="Velocity")
@@ -50,7 +50,7 @@ with CheckpointFile(file0+".h5", 'r') as checkpoint0:
     print("testc0 = ", testc0)
 
 print("\n")
-print("=== content in " + file1 + " ===")
+print("=== content in " + file1 + ".h5 ===")
 with CheckpointFile(file1+".h5", 'r') as checkpoint1:
     mesh1 = checkpoint1.load_mesh("mesh")
     timestepping_history1 = checkpoint1.get_timestepping_history(mesh1, name="Velocity")
@@ -70,7 +70,7 @@ with CheckpointFile(file1+".h5", 'r') as checkpoint1:
     print("testc1 = ", testc1)
     
 print("\n")
-print("=== calculate normalised norms in " + file0 + " with respect to " + file1 + " ===")
+print("=== calculate normalised norms in " + file0 + ".h5 with respect to " + file1 + ".h5 ===")
 etanorm_list = []
 unorm_list = []
 for i in range(min(length0, length1)):

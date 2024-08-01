@@ -11,7 +11,7 @@ print = PETSc.Sys.Print
 parser = argparse.ArgumentParser(description='Williamson 5 testcase for averaged propagator.')
 parser.add_argument('--ref_level', type=int, default=3, help='Refinement level of icosahedral grid. Default 4.')
 parser.add_argument('--tmax', type=float, default=360, help='Final time in hours. Default 24x15=360.')
-parser.add_argument('--dumpt', type=float, default=6, help='Dump time in hours. Default 24.')
+parser.add_argument('--dumpt', type=float, default=24, help='Dump time in hours. Default 24.')
 parser.add_argument('--checkt', type=float, default=6, help='Create checkpointing file every checkt hours. Default 6.')
 parser.add_argument('--dt', type=float, default=1800, help='Timestep for the standard model in seconds. Default 45.')
 parser.add_argument('--filename', type=str, default='standard')
