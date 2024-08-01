@@ -31,7 +31,6 @@ parser.add_argument('--timestepping', type=str, default='rk4', choices=['rk4', '
 parser.add_argument('--pickup', action='store_true', help='Pickup the result from the checkpoint.')
 parser.add_argument('--nslices', type=int, default=2, help='Number of time-slices per time-window.')
 parser.add_argument('--alphap', type=float, default=0.0001, help='Circulant coefficient.')
-parser.add_argument('--pickup_mesh', action='store_true', help='Pickup the mesh from the checkpoint.')
 
 # print out arguments
 args = parser.parse_known_args()

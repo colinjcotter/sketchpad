@@ -16,7 +16,6 @@ parser.add_argument('--checkt', type=float, default=6, help='Create checkpointin
 parser.add_argument('--dt', type=float, default=1800, help='Timestep for the standard model in seconds. Default 45.')
 parser.add_argument('--filename', type=str, default='standard')
 parser.add_argument('--pickup', action='store_true', help='Pickup the result from the checkpoint.')
-parser.add_argument('--pickup_mesh', action='store_true', help='Pickup the mesh from the checkpoint.')
 
 args = parser.parse_known_args()
 args = args[0]
