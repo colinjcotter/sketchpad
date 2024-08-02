@@ -1,10 +1,11 @@
 from firedrake import *
+from math import pi
 
 ncells = 100
-L = 10.
+L = 10
 mesh = PeriodicIntervalMesh(ncells, L)
 
-V = FunctionSpace(mesh, "CG", 2)
+V = FunctionSpace(mesh, "Hermite", 3)
 
 un = Function(V)
 unp1 = Function(V)
@@ -16,12 +17,9 @@ v = TestFunction(V)
 dt = 0.01
 dT = Constant(dt)
 
-alpha = Constant(1.0)
-beta = Constant(0.02923)
-gamma = Constant(1.)
-
-h = avg(CellVolume(mesh))/FacetArea(mesh)
-n = FacetNormal(mesh)
+alpha = Constant(1.0) # viscosity
+beta = Constant(0.02923) # hyperviscosity
+gamma = Constant(1.) # advection
 
 # C0 regularisation constant
 gamma = Constant(1.0)
@@ -31,9 +29,6 @@ eqn = (
     - dT*alpha*v.dx(0)*uh.dx(0)*dx
     + dT*beta*(
         v.dx(0).dx(0)*uh.dx(0).dx(0)*dx
-        + (dot(n("+"), dot(avg(grad(grad(v))), n("+"))))*jump(grad(uh), n)*dS
-        + (dot(n("+"), dot(avg(grad(grad(uh))), n("+"))))*jump(grad(v), n)*dS
-        + gamma/h*jump(grad(v), n)*jump(grad(uh), n)*dS
                )
     - dT*gamma*0.5*v.dx(0)*uh*uh*dx
     )
@@ -54,10 +49,10 @@ KSSolver = NonlinearVariationalSolver(KSProb,
 #initial condition
 
 x, = SpatialCoordinate(mesh)
-un.project(sin(pi*2*x))
+un.project(sin(pi*2*x) + 0.2*cos(pi*x))
 
 t = 0.
-tmax = 10.
+tmax = 1000.
 tdump = 1.
 dumpt = 0.
 
