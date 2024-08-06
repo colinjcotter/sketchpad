@@ -174,7 +174,41 @@ hybridscpc_parameters = {
 
 atol = 1e-10
 rtol = 1e-8
-solver_parameters_diag = {
+solver_parameters_diag_t = {
+    'mat_type': 'matfree',
+    'ksp_type': 'fgmres',
+    'ksp': {
+        'monitor': None,
+        'converged_reason': None,
+        'rtol': rtol,
+        'atol': atol,
+        'stol': 1e-12,
+    },
+    'pc_type': 'python',
+    'pc_python_type': 'asQ.CirculantPC',
+    'circulant_alpha': args.alphap,
+    'circulant_state': 'linear',
+    'aaos_jacobian_state': 'linear',
+}
+
+solver_parameters_diag_t_half = {
+    'mat_type': 'matfree',
+    'ksp_type': 'fgmres',
+    'ksp': {
+        'monitor': None,
+        'converged_reason': None,
+        'rtol': rtol,
+        'atol': atol,
+        'stol': 1e-12,
+    },
+    'pc_type': 'python',
+    'pc_python_type': 'asQ.CirculantPC',
+    'circulant_alpha': args.alphap,
+    'circulant_state': 'linear',
+    'aaos_jacobian_state': 'linear',
+}
+
+solver_parameters_diag_s = {
     'mat_type': 'matfree',
     'ksp_type': 'fgmres',
     'ksp': {
@@ -216,14 +250,20 @@ time_partition_s = [slice_length_s for _ in range(args.nslices)]
 # setup parameters for paradiag solve (the number of windows is fixed to 1)
 if args.advection:
     for i in range(sum(time_partition_t)):
-        solver_parameters_diag['circulant_block_'+str(i)+'_'] = monoparameters_ns
-        if i == 0:
-            PETSc.Sys.Print('set monoparameters_ns as solver_parameters_diag')
+        solver_parameters_diag_t['circulant_block_'+str(i)+'_'] = monoparameters_ns
+    for i in range(sum(time_partition_t_half)):
+        solver_parameters_diag_t_half['circulant_block_'+str(i)+'_'] = monoparameters_ns
+    for i in range(sum(time_partition_s)):
+        solver_parameters_diag_s['circulant_block_'+str(i)+'_'] = monoparameters_ns
+    PETSc.Sys.Print('set monoparameters_ns as solver_parameters_diag')
 else:
     for i in range(sum(time_partition_t)):
-        solver_parameters_diag['circulant_block_'+str(i)+'_'] = hybridscpc_parameters
-        if i == 0:
-            PETSc.Sys.Print('set hybridscpc_parameters as solver_parameters_diag')
+        solver_parameters_diag_t['circulant_block_'+str(i)+'_'] = hybridscpc_parameters
+    for i in range(sum(time_partition_t_half)):
+        solver_parameters_diag_t_half['circulant_block_'+str(i)+'_'] = hybridscpc_parameters
+    for i in range(sum(time_partition_s)):
+        solver_parameters_diag_s['circulant_block_'+str(i)+'_'] = hybridscpc_parameters
+    PETSc.Sys.Print('set hybridscpc_parameters as solver_parameters_diag')
 
 # setup ensemble
 ensemble = asQ.create_ensemble(time_partition_t)
@@ -379,7 +419,8 @@ if args.advection:
 backwardp_expProb = LinearVariationalProblem(lhs(F0p), rhs(F0p), W0,
                                              constant_jacobian=constant_jacobian)
 backwardp_expsolver = LinearVariationalSolver(backwardp_expProb,
-                                                solver_parameters=params)
+                                              solver_parameters=params,
+                                              options_prefix="backwardp_expsolver")
 
 # negative s inward propagation
 dt_ss = -dt_s
@@ -395,7 +436,8 @@ if args.advection:
 backwardm_expProb = LinearVariationalProblem(lhs(F0m), rhs(F0m), W0,
                                              constant_jacobian=constant_jacobian)
 backwardm_expsolver = LinearVariationalSolver(backwardm_expProb,
-                                                solver_parameters=params)
+                                              solver_parameters=params,
+                                              options_prefix="backwardm_expsolver")
 
 
 ### === --- Set up the Nonlinear operator W -> N(W) --- === ###
@@ -457,7 +499,8 @@ if args.advection:
 NProb = LinearVariationalProblem(lhs(L), rhs(L), N,
                                  constant_jacobian=constant_jacobian)
 NSolver = LinearVariationalSolver(NProb,
-                                  solver_parameters = mparams)
+                                  solver_parameters = mparams,
+                                  options_prefix="NSolver")
 
 
 ### === --- Set up AllAtOnceFunctions --- === ###
@@ -495,35 +538,38 @@ def form_mass(uu, up, vu, vp):
 propagate_form = asQ.AllAtOnceForm(Wall, dt/nt, theta,
                                    form_mass, get_form_function())
 propagate_solver = asQ.AllAtOnceSolver(propagate_form, Wall,
-                                       solver_parameters=solver_parameters_diag,
+                                       solver_parameters=solver_parameters_diag_t,
                                        options_prefix="propagate_solver")
 propagate_form_half = asQ.AllAtOnceForm(Wallh, dt/nt, theta,
                                         form_mass, get_form_function())
 propagate_solver_half = asQ.AllAtOnceSolver(propagate_form_half, Wallh,
-                                            solver_parameters=solver_parameters_diag,
+                                            solver_parameters=solver_parameters_diag_t_half,
                                             options_prefix="propagate_solver_half")
 
 ### === --- Set up AllAtOnceSolver for forward scatter in ns --- === ###
 Wpform = asQ.AllAtOnceForm(Walls, alpha*dt/ns, theta,
                            form_mass, get_form_function(upwind=True))
 Wpsolver = asQ.AllAtOnceSolver(Wpform, Walls,
-                               solver_parameters=solver_parameters_diag)
+                               solver_parameters=solver_parameters_diag_s,
+                               options_prefix="Wpsolver")
 Wmform = asQ.AllAtOnceForm(Walls, -alpha*dt/ns, theta,
                            form_mass, get_form_function(upwind=False))
 Wmsolver = asQ.AllAtOnceSolver(Wmform, Walls,
-                               solver_parameters=solver_parameters_diag)
+                               solver_parameters=solver_parameters_diag_s,
+                               options_prefix="Wmsolver")
 
 
 ### === --- Set up AllAtOnceSolver for backward gather in ns --- === ###
 Xpform = asQ.AllAtOnceForm(Xall, alpha*dt/ns, theta,
                            form_mass, get_form_function(upwind=True))
 Xpsolver = asQ.AllAtOnceSolver(Xpform, Xall,
-                               solver_parameters=solver_parameters_diag)
+                               solver_parameters=solver_parameters_diag_s,
+                               options_prefix="Xpsolver")
 Xmform = asQ.AllAtOnceForm(Xall, -alpha*dt/ns, theta,
                            form_mass, get_form_function(upwind=False))
 Xmsolver = asQ.AllAtOnceSolver(Xmform, Xall,
-                               solver_parameters=solver_parameters_diag)
-
+                               solver_parameters=solver_parameters_diag_s,
+                               options_prefix="Xmsolver")
 
 ### === --- Setup Ftp/Ftm to be assembled as RHS and used in Xpsolver/Xmsolver --- === ###
 X0 = Function(W)
