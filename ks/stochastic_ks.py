@@ -1,5 +1,5 @@
 from firedrake import *
-from math import pi
+from math import pi, ceil
 
 ncells = 100
 L = 10
@@ -58,8 +58,8 @@ x, = SpatialCoordinate(mesh)
 un.project(sin(pi*2*x) + 0.2*cos(pi*x))
 
 t = 0.
-tmax = 1000.
-tdump = 1.
+tmax = 10.
+tdump = 0.1
 dumpt = 0.
 
 file0 = File("stuff.pvd")
@@ -70,13 +70,14 @@ file0.write(uout)
 
 area = CellVolume(mesh)
 
-while t < tmax - dt/2:
+nsteps = ceil(tmax/dt)
+
+for step in ProgressBar("timestep").iter(range(nsteps)):
     t += dt
 
     new_dW = rg.normal(DG0, 0. , 1.)
     dW.interpolate(dt**0.5*new_dW/area**0.5)
     KSSolver.solve()
-    print(norm(unp1))
     un.assign(unp1)
 
     if dumpt > tdump - dt/2:
