@@ -21,9 +21,6 @@ alpha = Constant(1.0) # viscosity
 beta = Constant(0.02923) # hyperviscosity
 gamma = Constant(1.) # advection
 
-# C0 regularisation constant
-gamma = Constant(1.0)
-
 eqn = (
     v*(unp1 - un)*dx
     - dT*alpha*v.dx(0)*uh.dx(0)*dx

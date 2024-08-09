@@ -17,12 +17,17 @@ v = TestFunction(V)
 dt = 0.01
 dT = Constant(dt)
 
+# stochastic bits
+
+DG0 = FunctionSpace(mesh, "DG", 0)
+pcg = PCG64(seed=84574584563)
+rg = RandomGenerator(pcg)
+dW = Function(DG0)
+
 alpha = Constant(1.0) # viscosity
 beta = Constant(0.02923) # hyperviscosity
 gamma = Constant(1.) # advection
-
-# C0 regularisation constant
-gamma = Constant(1.0)
+dc = Constant(0.1) # diffusion coefficient for noise
 
 eqn = (
     v*(unp1 - un)*dx
@@ -31,6 +36,7 @@ eqn = (
         v.dx(0).dx(0)*uh.dx(0).dx(0)*dx
                )
     - dT*gamma*0.5*v.dx(0)*uh*uh*dx
+    - dc*dW*v*dx
     )
 
 params = {
@@ -62,9 +68,13 @@ uout = Function(VOut)
 uout.interpolate(un)
 file0.write(uout)
 
+area = CellVolume(mesh)
+
 while t < tmax - dt/2:
     t += dt
 
+    new_dW = rg.normal(DG0, 0. , 1.)
+    dW.interpolate(dt**0.5*new_dW/area**0.5)
     KSSolver.solve()
     print(norm(unp1))
     un.assign(unp1)
