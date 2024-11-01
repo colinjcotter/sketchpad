@@ -4,7 +4,14 @@ from ufl.algorithms.ad import expand_derivatives
 from irksome.pc import RanaBase
 import numpy as np
 
-butcher_tableau = RadauIIA(9)
+import argparse
+parser = argparse.ArgumentParser(description='IRK Wave equation solver using parallel SDC preconditioner.')
+parser.add_argument('--stages', type=int, default=2, help='Number of stages. Default 2.')
+
+args = parser.parse_known_args()
+args = args[0]
+
+butcher_tableau = RadauIIA(args.stages)
 N = 50
 
 x0 = 0.0
@@ -32,7 +39,7 @@ u0, p0 = split(U)
 v, w = TestFunctions(W)
 F = inner(Dt(u0), v)*dx + inner(div(u0), w) * dx + inner(Dt(p0), w)*dx - inner(p0, div(v)) * dx
 
-bc = DirichletBC(W.sub(0), 0, "on_boundary")
+bc = DirichletBC(W.sub(0), as_vector([0, 0]), "on_boundary")
 
 class PQPC(RanaBase):
     def getAtilde(self, A):
@@ -41,7 +48,8 @@ class PQPC(RanaBase):
 params = {"mat_type": "matfree",
           "snes_type": "ksponly",
           "ksp_type": "gmres",
-          "ksp_monitor": None,
+          "ksp_atol": 1.0e-50,
+          "ksp_rtol": 1.0e-6,
           "pc_type": "python",
           "pc_python_type": "__main__.PQPC",
           "aux" : 
@@ -51,19 +59,19 @@ params = {"mat_type": "matfree",
           }
           }
 
-params = {
-    "ksp_type": "preonly",
-    "pc_type": "lu",
-}
-
-params = {"mat_type": "aij",
-          "snes_type": "ksponly",
-          "ksp_type": "preonly",
-          "pc_type": "lu"}
-
-stepper = TimeStepper(F, butcher_tableau, t, dt, U,
+stepper = TimeStepper(F, butcher_tableau, t, dt, U, bcs=bc,
                       solver_parameters=params)
-#stepper = TimeStepper(F, butcher_tableau, t, dt, U, bcs=bc,
-#                      solver_parameters=params)
-    
-stepper.advance()
+E = 0.5 * (inner(u0, u0)*dx + inner(p0, p0)*dx)
+e0 = assemble(E)
+while (float(t) < 1.0):
+    if float(t) + float(dt) > 1.0:
+        dt.assign(1.0 - float(t))
+
+    stepper.advance()
+
+    t.assign(float(t) + float(dt))
+steps, nits, its = stepper.solver_stats()
+eerror = (e0-assemble(E))/e0
+print(its/steps, eerror, args.stages)
+
+
