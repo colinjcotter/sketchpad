@@ -70,7 +70,7 @@ hparams = {
     "snes_lag_preconditioner": -2,
     #"snes_lag_preconditioner_persists": None,
     'mat_type': 'matfree',
-    'ksp_type': 'gmres',
+    'ksp_type': 'preonly',
     #'ksp_monitor': None,
     #'ksp_converged_reason': None,
     'pc_type': 'python',
@@ -174,9 +174,12 @@ hybridscpc_parameters = {
 
 atol = 1e-10
 rtol = 1e-8
+# snes_type ksponly
+# snes_type ksponly
 solver_parameters_diag_t = {
     'mat_type': 'matfree',
     'ksp_type': 'fgmres',
+    'snes_converged_reason': None,
     'ksp': {
         'monitor': None,
         'converged_reason': None,
@@ -194,6 +197,7 @@ solver_parameters_diag_t = {
 solver_parameters_diag_t_half = {
     'mat_type': 'matfree',
     'ksp_type': 'fgmres',
+    'snes_converged_reason': None,
     'ksp': {
         'monitor': None,
         'converged_reason': None,
@@ -211,6 +215,7 @@ solver_parameters_diag_t_half = {
 solver_parameters_diag_s = {
     'mat_type': 'matfree',
     'ksp_type': 'fgmres',
+    'snes_converged_reason': None,
     'ksp': {
         'monitor': None,
         'converged_reason': None,
