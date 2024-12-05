@@ -176,6 +176,12 @@ monoparameters_nt = {
 
 atol = 1e-10
 rtol = 1e-8
+
+if args.advection:
+    block_parameters = monoparameters_ns
+else:
+    block_parameters = hparams
+
 solver_parameters_diag = {
     'mat_type': 'matfree',
     'ksp_type': 'fgmres',
@@ -186,20 +192,23 @@ solver_parameters_diag = {
         'atol': atol,
         'stol': 1e-12,
     },
-    'pc_type': 'python',
-    'pc_python_type': 'asQ.CirculantPC',
-    'circulant_alpha': args.alphap,
-    'circulant_state': 'linear',
-    'aaos_jacobian_state': 'linear',
+    'pc_type': 'composite',
+    'pc_composite_pcs': 'python,python',
+    'pc_composite_type': 'multiplicative',
+    'sub_0' : {'pc_python_type': 'asQ.CirculantPC',
+               'circulant_alpha': args.alphap,
+               'circulant_state': 'linear',
+               'aaos_jacobian_state': 'linear'},
+    'sub_1' : {'pc_python_type': 'asQ.JacobiPC',
+               'aaojacobi_block': block_parameters,
+               'aaojacobi_state': 'linear',
+               'aaos_jacobian_state': 'linear'}
 }
 
 # setup parameters for paradiag solve (the number of windows is fixed to 1)
-if args.advection:
-    solver_parameters_diag['circulant_block_'+str(i)+'_'] = monoparameters_ns
-    print('set monoparameters_ns as solver_parameters_diag')
-else:
-    solver_parameters_diag['circulant_block_'+str(i)+'_'] = hparams
-    print('set hparams as solver_parameters_diag')
+for i in range(sum(time_partition_t)):
+    solver_parameters_diag[
+        'sub_0_circulant_block_'+str(i)+'_'] = block_parameters
 
 PETSc.Sys.Print('### === --- Calculating parallel solution --- === ###')
 
