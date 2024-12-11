@@ -40,27 +40,27 @@ p0.interpolate(exp(-(x-0.5)**2/sigma**2))
 
 w = Function(W)
 v, q = TestFunctions(Wt)
-u, p = TrialFunctions(W)
+deltau, deltap = TrialFunctions(W)
 
-u = u0 + u
-p = p0 + p
+u = u0 + deltau
+p = p0 + deltap
 
 eqn = (
     v*u.dx(1)*dx - v.dx(0)*p*dx
     + q*p.dx(1)*dx + q*u.dx(0)*dx
     )
 
-u, p = split(w)
+deltau, deltap = split(w)
 v = TestFunction(V0)
 u_next = TrialFunction(V0)
 v_update_eqn = (
-    v*(u_next - u - u0)*ds_t
+    v*(u_next - deltau - u0)*ds_t
 )
 
 q = TestFunction(Q0)
 p_next = TrialFunction(Q0)
 p_update_eqn = (
-    q*(p_next - p - p0)*ds_t
+    q*(p_next - deltap - p0)*ds_t
 )
 
 outfile = VTKFile("outfile_mixed.pvd")
