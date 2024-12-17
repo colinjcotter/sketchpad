@@ -12,8 +12,8 @@ import argparse
 parser = argparse.ArgumentParser(description='Williamson 5 testcase for averaged propagator using D (thickness) as the pressure variable.')
 parser.add_argument('--ref_level', type=int, default=3, help='Refinement level of icosahedral grid. Default 3.')
 parser.add_argument('--tmax', type=float, default=360, help='Final time in hours. Default 24x15=360.')
-parser.add_argument('--dumpt', type=float, default=24, help='Dump time in hours. Default 6.')
-parser.add_argument('--checkt', type=float, default=6, help='Create checkpointing file every checkt hours. Default 6.')
+parser.add_argument('--dumpt', type=float, default=6, help='Dump time in hours. Default 6.')
+parser.add_argument('--checkt', type=float, default=24, help='Create checkpointing file every checkt hours. Default 6.')
 parser.add_argument('--dt', type=float, default=0.5, help='Timestep in hours. Default 3.')
 parser.add_argument('--ns', type=int, default=4, help='Number of s steps in exponential approximation for average')
 parser.add_argument('--nt', type=int, default=4, help='Number of t steps in exponential approximation for time propagator')
@@ -262,7 +262,6 @@ else:
 Wall = asQ.AllAtOnceFunction(ensemble, time_partition_t, W)
 Wallh = asQ.AllAtOnceFunction(ensemble, time_partition_t_half, W)
 Walls = asQ.AllAtOnceFunction(ensemble, time_partition_s, W)
-Walls_new = asQ.AllAtOnceFunction(ensemble, time_partition_s, W)
 Nall = asQ.AllAtOnceFunction(ensemble, time_partition_s, W)
 Nall_new = asQ.AllAtOnceFunction(ensemble, time_partition_s, W)
 Xall = asQ.AllAtOnceFunction(ensemble, time_partition_s, W)
@@ -728,19 +727,19 @@ def data_flip(Nall, Nall_new):
 
     MPI.Request.Waitall(mpi_requests)
 
-# Fall = asQ.AllAtOnceFunction(ensemble, time_partition_s, V2)
-# Fall_new = asQ.AllAtOnceFunction(ensemble, time_partition_s, V2)
+Fall = asQ.AllAtOnceFunction(ensemble, time_partition_s, V2)
+Fall_new = asQ.AllAtOnceFunction(ensemble, time_partition_s, V2)
 
-# for ilocal in range(time_partition_s[ensemble_rank]):
-#     iglobal = Fall.transform_index(ilocal, from_range='slice', to_range='window')
-#     Fall[ilocal].assign(iglobal)
+for ilocal in range(time_partition_s[ensemble_rank]):
+    iglobal = Fall.transform_index(ilocal, from_range='slice', to_range='window')
+    Fall[ilocal].assign(iglobal)
 
-# data_flip(Fall, Fall_new)
+data_flip(Fall, Fall_new)
 
-# for ilocal in range(time_partition_s[ensemble_rank]):
-#     iglobal = Fall_new.transform_index(ilocal, from_range='slice', to_range='window')
-#     i = ns-iglobal-1
-#     assert(norm(Fall_new[ilocal] - i) < 1.e-08)
+for ilocal in range(time_partition_s[ensemble_rank]):
+    iglobal = Fall_new.transform_index(ilocal, from_range='slice', to_range='window')
+    i = ns-iglobal-1
+    assert(norm(Fall_new[ilocal] - i) < 1.e-07)
 
 V = Function(W)
 dVdt = Function(W)
@@ -788,34 +787,34 @@ def get_dVdt(V, dVdt, positive=True, t=None):
             W1.assign(Walls[step])
             NSolver.solve()
             Nall[step].assign(N)
-            if paradiag_X:
-                # compute RHS
-                step_W = Walls.transform_index(step, from_range='slice', to_range='window')
-                w_k.assign(weights[step_W+1])
-                if positive:
-                    assemble(Ftp, tensor=RHS[step])
-                else:
-                    assemble(Ftm, tensor=RHS[step])
 
     # backwards gather
     if paradiag_X:
+        # flip the data in Nall
+        data_flip(Nall, Nall_new)
+        for step in range(time_partition_s[ensemble_rank]):
+            # compute RHS
+            step_W = Walls.transform_index(step, from_range='slice', to_range='window')
+            w_k.assign(weights_r[step_W])
+            N.assign(Nall_new[step])
+            if positive:
+                assemble(Ftp, tensor=RHS[step])
+            else:
+                assemble(Ftm, tensor=RHS[step])
         # solve backward process using paradiag
         Xall.zero()
-        # flip the data in RHS
-        data_flip(RHS, RHS_new)
         # solve allatoncesolver with RHS in the option
         if positive:
-            Xpsolver.solve(rhs=RHS_new)
+            Xpsolver.solve(rhs=RHS)
         else:
-            Xmsolver.solve(rhs=RHS_new)
+            Xmsolver.solve(rhs=RHS)
         Xall.bcast_field(-1, dVdt)
     elif paradiag_n:
         # solve backward process using Nall in serial
         X1.assign(0.)
         for step in ProgressBar(f'average backward').iter(range(ns, 0, -1)):
-            # set N, W1, w_k
+            # set N, w_k
             Nall.bcast_field(step-1, N)
-            Walls.bcast_field(step-1, W1)
             w_k.assign(weights[step])
             # propagate X back
             with PETSc.Log.Event("backward integration"):
@@ -829,13 +828,11 @@ def get_dVdt(V, dVdt, positive=True, t=None):
     elif paradiag_nf:
         # solve backward process using Nall and flipping to solve forward in serial
         X1.assign(0.)
-        # flip the data in Nall and Wall
+        # flip the data in Nall
         data_flip(Nall, Nall_new)
-        data_flip(Walls, Walls_new)
         for step in ProgressBar(f'average forward after flipping').iter(range(ns)):
-            # set N, W1, w_k
+            # set N, w_k
             Nall_new.bcast_field(step, N)
-            Walls_new.bcast_field(step, W1)
             w_k.assign(weights_r[step])
             # propagate X back
             with PETSc.Log.Event("backward integration"):
@@ -871,7 +868,6 @@ def get_dVdt(V, dVdt, positive=True, t=None):
                 W1.assign(W0)
         # copy contents
         dVdt.assign(X0)
-
 
 # Function to apply forward propagation in t
 def propagate(V_in, V_out, t=None, half=False):
