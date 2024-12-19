@@ -213,6 +213,7 @@ solver_parameters_diag = {
     'pc_type': 'composite',
     'pc_composite_pcs': 'python,python',
     'pc_composite_type': 'multiplicative',
+    'circulant_block_0_ksp_view': None,
     'sub_0' : {'pc_python_type': 'asQ.CirculantPC',
                'circulant_alpha': args.alphap,
                'circulant_state': 'linear',
