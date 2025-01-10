@@ -15,7 +15,6 @@ theta0, F0 = U0.subfunctions
 theta1, F1 = U1.subfunctions
 
 F_ground = Constant(0.1)
-#F1.assign(F_ground)
 
 x, = SpatialCoordinate(mesh)
 
@@ -26,7 +25,7 @@ theta1, F1 = split(U1)
 
 Pi = (2-x)**(2./7)
 
-Dt = Constant(0.001)
+Dt = Constant(0.01)
 
 dtheta, dF = TestFunctions(W)
 
@@ -37,7 +36,7 @@ eqn = (
 )*dx
 
 bcs = [DirichletBC(W.sub(1), F_ground, 1),
-       DirichletBC(W.sub(1), 0, 1)]
+       DirichletBC(W.sub(1), 0, 2)]
 
 
 problem = NonlinearVariationalProblem(eqn, U1,  bcs=bcs)
@@ -62,10 +61,11 @@ solver = NonlinearVariationalSolver(problem,
 
 theta1, F1 = U1.subfunctions
 file0 = VTKFile("output.pvd")
-file0.write(theta1)
+U1.assign(U0)
+file0.write(theta1, F1)
 
-nsteps = 50
+nsteps = 500
 for step in range(nsteps):
     solver.solve(bounds=(lbound, ubound))
-    file0.write(theta1)
+    file0.write(theta1, F1)
     U0.assign(U1)
