@@ -3,8 +3,8 @@ from firedrake import *
 n = 20
 mesh = UnitIntervalMesh(n)
 
-V = FunctionSpace(mesh, "CG", 2)
-Q = FunctionSpace(mesh, "DG", 1)
+V = FunctionSpace(mesh, "CG", 1)
+Q = FunctionSpace(mesh, "DG", 0)
 
 W = Q*V
 
