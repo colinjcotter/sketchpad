@@ -657,11 +657,11 @@ if paradiag_nf:
 
 
 if paradiag_X:
-    Xpform = asQ.AllAtOnceForm(Xall, alpha*dt/ns, theta,
+    Xpform = asQ.AllAtOnceForm(Xall, -alpha*dt/ns, theta,
                                form_mass, get_form_function(upwind=True))
     Xpsolver = asQ.AllAtOnceSolver(Xpform, Xall,
                                    solver_parameters=solver_parameters_diag)
-    Xmform = asQ.AllAtOnceForm(Xall, -alpha*dt/ns, theta,
+    Xmform = asQ.AllAtOnceForm(Xall, alpha*dt/ns, theta,
                                form_mass, get_form_function(upwind=False))
     Xmsolver = asQ.AllAtOnceSolver(Xmform, Xall,
                                    solver_parameters=solver_parameters_diag)
@@ -798,9 +798,9 @@ def get_dVdt(V, dVdt, positive=True, t=None):
             w_k.assign(weights_r[step_W])
             N.assign(Nall_new[step])
             if positive:
-                assemble(Ftp, tensor=RHS[step])
+                assemble(-Ftp, tensor=RHS[step])
             else:
-                assemble(Ftm, tensor=RHS[step])
+                assemble(-Ftm, tensor=RHS[step])
         # solve backward process using paradiag
         Xall.zero()
         # solve allatoncesolver with RHS in the option
