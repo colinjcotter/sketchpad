@@ -87,6 +87,8 @@ print("dt steps per min wavelength", min_period/dt*nt)
 if args.check:
     import sys; sys.exit()
 
+from utils.hybridisation import HybridisedSCPC 
+
 # solver parameters
 hparams = {
     #"snes_view": None,
@@ -102,6 +104,22 @@ hparams = {
                       'pc_type': 'lu',
                       'pc_factor_mat_solver_type': 'mumps'
                       }}
+
+hparams_hybridisation = {
+    #"snes_view": None,
+    #"snes_lag_preconditioner": 10,
+    #"snes_lag_preconditioner_persists": None,
+    'mat_type': 'matfree',
+    'ksp_type': 'gmres',
+    #'ksp_monitor': None,
+    #'ksp_converged_reason': None,
+    'pc_type': 'python',
+    'pc_python_type': f"{__name__}.HybridisedSCPC",
+    'hybridization': {'ksp_type': 'preonly',
+                      'pc_type': 'lu',
+                      'pc_factor_mat_solver_type': 'mumps'
+                      }}
+
 mparams = {
     #'ksp_monitor': None,
     'ksp_type': 'preonly',
@@ -176,6 +194,12 @@ monoparameters_nt = {
 
 atol = 1e-10
 rtol = 1e-8
+
+if args.advection:
+    block_parameters = monoparameters_ns
+else:
+    block_parameters = hparams_hybridisation
+
 solver_parameters_diag = {
     'mat_type': 'matfree',
     'ksp_type': 'fgmres',
@@ -186,22 +210,19 @@ solver_parameters_diag = {
         'atol': atol,
         'stol': 1e-12,
     },
-    'pc_type': 'python',
-    'pc_python_type': 'asQ.CirculantPC',
-    'circulant_alpha': args.alphap,
-    'circulant_state': 'linear',
-    'aaos_jacobian_state': 'linear',
+    'pc_type': 'composite',
+    'pc_composite_pcs': 'python,python',
+    'pc_composite_type': 'multiplicative',
+    'circulant_block_0_ksp_view': None,
+    'sub_0' : {'pc_python_type': 'asQ.CirculantPC',
+               'circulant_alpha': args.alphap,
+               'circulant_state': 'linear',
+               'aaos_jacobian_state': 'linear'},
+    'sub_1' : {'pc_python_type': 'asQ.JacobiPC',
+               'aaojacobi_block': block_parameters,
+               'aaojacobi_state': 'linear',
+               'aaos_jacobian_state': 'linear'}
 }
-
-# setup parameters for paradiag solve (the number of windows is fixed to 1)
-if args.advection:
-    solver_parameters_diag['circulant_block_'+str(i)+'_'] = monoparameters_ns
-    print('set monoparameters_ns as solver_parameters_diag')
-else:
-    solver_parameters_diag['circulant_block_'+str(i)+'_'] = hparams
-    print('set hparams as solver_parameters_diag')
-
-PETSc.Sys.Print('### === --- Calculating parallel solution --- === ###')
 
 # setup slice length
 slice_length_t = int(nt/args.nslices)
@@ -211,10 +232,19 @@ assert(slice_length_t_half*args.nslices == nt/2)
 slice_length_s = int(ns/args.nslices)
 assert(slice_length_s*args.nslices == ns)
 
+
 # setup time_partition
 time_partition_t = [slice_length_t for _ in range(args.nslices)]
 time_partition_t_half = [slice_length_t_half for _ in range(args.nslices)]
 time_partition_s = [slice_length_s for _ in range(args.nslices)]
+
+# setup parameters for paradiag solve (the number of windows is fixed to 1)
+for i in range(sum(time_partition_t)):
+    solver_parameters_diag[
+        'sub_0_circulant_block_'+str(i)+'_'] = block_parameters
+
+PETSc.Sys.Print('### === --- Calculating parallel solution --- === ###')
+
 
 # setup ensemble
 ensemble = asQ.create_ensemble(time_partition_t)
