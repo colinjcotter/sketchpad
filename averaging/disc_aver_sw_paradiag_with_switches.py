@@ -174,6 +174,22 @@ monoparameters_nt = {
     #"patch_sub_pc_factor_shift_type": "nonzero",
 }
 
+PETSc.Sys.Print('### === --- Calculating parallel solution --- === ###')
+
+# setup slice length
+slice_length_t = int(nt/args.nslices)
+assert(slice_length_t*args.nslices == nt)
+slice_length_t_half = int(nt/2/args.nslices)
+assert(slice_length_t_half*args.nslices == nt/2)
+slice_length_s = int(ns/args.nslices)
+assert(slice_length_s*args.nslices == ns)
+
+# setup time_partition
+time_partition_t = [slice_length_t for _ in range(args.nslices)]
+time_partition_t_half = [slice_length_t_half for _ in range(args.nslices)]
+time_partition_s = [slice_length_s for _ in range(args.nslices)]
+
+# setup parameters for paradiag solve (the number of windows is fixed to 1)
 atol = 1e-10
 rtol = 1e-8
 solver_parameters_diag = {
@@ -193,28 +209,13 @@ solver_parameters_diag = {
     'aaos_jacobian_state': 'linear',
 }
 
-# setup parameters for paradiag solve (the number of windows is fixed to 1)
 if args.advection:
-    solver_parameters_diag['circulant_block_'+str(i)+'_'] = monoparameters_ns
-    print('set monoparameters_ns as solver_parameters_diag')
+    block_parameters = monoparameters_ns
 else:
-    solver_parameters_diag['circulant_block_'+str(i)+'_'] = hparams
-    print('set hparams as solver_parameters_diag')
+    block_parameters = hparams
 
-PETSc.Sys.Print('### === --- Calculating parallel solution --- === ###')
-
-# setup slice length
-slice_length_t = int(nt/args.nslices)
-assert(slice_length_t*args.nslices == nt)
-slice_length_t_half = int(nt/2/args.nslices)
-assert(slice_length_t_half*args.nslices == nt/2)
-slice_length_s = int(ns/args.nslices)
-assert(slice_length_s*args.nslices == ns)
-
-# setup time_partition
-time_partition_t = [slice_length_t for _ in range(args.nslices)]
-time_partition_t_half = [slice_length_t_half for _ in range(args.nslices)]
-time_partition_s = [slice_length_s for _ in range(args.nslices)]
+for i in range(sum(time_partition_t)):
+    solver_parameters_diag['circulant_block_'+str(i)+'_'] = block_parameters
 
 # setup ensemble
 ensemble = asQ.create_ensemble(time_partition_t)
