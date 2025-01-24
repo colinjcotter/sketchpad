@@ -67,10 +67,10 @@ if args.check:
 ### === --- Setup solver parameters --- === ###
 hparams = {
     #"snes_view": None,
-    "snes_lag_preconditioner": -2,
+    #"snes_lag_preconditioner": 10,
     #"snes_lag_preconditioner_persists": None,
     'mat_type': 'matfree',
-    'ksp_type': 'preonly',
+    'ksp_type': 'gmres',
     #'ksp_monitor': None,
     #'ksp_converged_reason': None,
     'pc_type': 'python',
@@ -78,7 +78,8 @@ hparams = {
     'hybridization': {'ksp_type': 'preonly',
                       'pc_type': 'lu',
                       'pc_factor_mat_solver_type': 'mumps'
-                      }}
+                      }
+}
 
 mparams = {
     #'ksp_monitor': None,
@@ -174,12 +175,10 @@ hybridscpc_parameters = {
 
 atol = 1e-10
 rtol = 1e-8
-# snes_type ksponly
-# snes_type ksponly
-solver_parameters_diag_t = {
+solver_parameters_diag = {
     'mat_type': 'matfree',
     'ksp_type': 'fgmres',
-    'snes_converged_reason': None,
+    #'snes_converged_reason': None,
     'ksp': {
         'monitor': None,
         'converged_reason': None,
@@ -194,42 +193,9 @@ solver_parameters_diag_t = {
     'aaos_jacobian_state': 'linear',
 }
 
-solver_parameters_diag_t_half = {
-    'mat_type': 'matfree',
-    'ksp_type': 'fgmres',
-    'snes_converged_reason': None,
-    'ksp': {
-        'monitor': None,
-        'converged_reason': None,
-        'rtol': rtol,
-        'atol': atol,
-        'stol': 1e-12,
-    },
-    'pc_type': 'python',
-    'pc_python_type': 'asQ.CirculantPC',
-    'circulant_alpha': args.alphap,
-    'circulant_state': 'linear',
-    'aaos_jacobian_state': 'linear',
-}
-
-solver_parameters_diag_s = {
-    'mat_type': 'matfree',
-    'ksp_type': 'fgmres',
-    'snes_converged_reason': None,
-    'ksp': {
-        'monitor': None,
-        'converged_reason': None,
-        'rtol': rtol,
-        'atol': atol,
-        'stol': 1e-12,
-    },
-    'pc_type': 'python',
-    'pc_python_type': 'asQ.CirculantPC',
-    'circulant_alpha': args.alphap,
-    'circulant_state': 'linear',
-    'aaos_jacobian_state': 'linear',
-}
-
+solver_parameters_diag_t = solver_parameters_diag
+solver_parameters_diag_t_half = solver_parameters_diag
+solver_parameters_diag_s = solver_parameters_diag
 
 # set constant_jacobian
 if args.dynamic_ubar:
@@ -252,23 +218,23 @@ time_partition_t = [slice_length_t for _ in range(args.nslices)]
 time_partition_t_half = [slice_length_t_half for _ in range(args.nslices)]
 time_partition_s = [slice_length_s for _ in range(args.nslices)]
 
-# setup parameters for paradiag solve (the number of windows is fixed to 1)
-if args.advection:
-    for i in range(sum(time_partition_t)):
-        solver_parameters_diag_t['circulant_block_'+str(i)+'_'] = monoparameters_ns
-    for i in range(sum(time_partition_t_half)):
-        solver_parameters_diag_t_half['circulant_block_'+str(i)+'_'] = monoparameters_ns
-    for i in range(sum(time_partition_s)):
-        solver_parameters_diag_s['circulant_block_'+str(i)+'_'] = monoparameters_ns
-    PETSc.Sys.Print('set monoparameters_ns as solver_parameters_diag')
-else:
-    for i in range(sum(time_partition_t)):
-        solver_parameters_diag_t['circulant_block_'+str(i)+'_'] = hybridscpc_parameters
-    for i in range(sum(time_partition_t_half)):
-        solver_parameters_diag_t_half['circulant_block_'+str(i)+'_'] = hybridscpc_parameters
-    for i in range(sum(time_partition_s)):
-        solver_parameters_diag_s['circulant_block_'+str(i)+'_'] = hybridscpc_parameters
-    PETSc.Sys.Print('set hybridscpc_parameters as solver_parameters_diag')
+# # setup parameters for paradiag solve (the number of windows is fixed to 1)
+# if args.advection:
+#     for i in range(sum(time_partition_t)):
+#         solver_parameters_diag_t['circulant_block_'+str(i)+'_'] = monoparameters_ns
+#     for i in range(sum(time_partition_t_half)):
+#         solver_parameters_diag_t_half['circulant_block_'+str(i)+'_'] = monoparameters_ns
+#     for i in range(sum(time_partition_s)):
+#         solver_parameters_diag_s['circulant_block_'+str(i)+'_'] = monoparameters_ns
+#     PETSc.Sys.Print('set monoparameters_ns as solver_parameters_diag')
+# else:
+#     for i in range(sum(time_partition_t)):
+#         solver_parameters_diag_t['circulant_block_'+str(i)+'_'] = hparams
+#     for i in range(sum(time_partition_t_half)):
+#         solver_parameters_diag_t_half['circulant_block_'+str(i)+'_'] = hparams
+#     for i in range(sum(time_partition_s)):
+#         solver_parameters_diag_s['circulant_block_'+str(i)+'_'] = hparams
+#     PETSc.Sys.Print('set hparams as solver_parameters_diag')
 
 # setup ensemble
 ensemble = asQ.create_ensemble(time_partition_t)
@@ -565,12 +531,12 @@ Wmsolver = asQ.AllAtOnceSolver(Wmform, Walls,
 
 
 ### === --- Set up AllAtOnceSolver for backward gather in ns --- === ###
-Xpform = asQ.AllAtOnceForm(Xall, alpha*dt/ns, theta,
+Xpform = asQ.AllAtOnceForm(Xall, -alpha*dt/ns, theta,
                            form_mass, get_form_function(upwind=True))
 Xpsolver = asQ.AllAtOnceSolver(Xpform, Xall,
                                solver_parameters=solver_parameters_diag_s,
                                options_prefix="Xpsolver")
-Xmform = asQ.AllAtOnceForm(Xall, -alpha*dt/ns, theta,
+Xmform = asQ.AllAtOnceForm(Xall, alpha*dt/ns, theta,
                            form_mass, get_form_function(upwind=False))
 Xmsolver = asQ.AllAtOnceSolver(Xmform, Xall,
                                solver_parameters=solver_parameters_diag_s,
@@ -721,9 +687,9 @@ def get_dVdt(V, dVdt, positive=True, t=None):
         step_W = Walls.transform_index(step, from_range='slice', to_range='window')
         w_k.assign(weights[step_W+1])
         if positive:
-            assemble(Ftp, tensor=RHS[step])
+            assemble(-Ftp, tensor=RHS[step])
         else:
-            assemble(Ftm, tensor=RHS[step])
+            assemble(-Ftm, tensor=RHS[step])
 
     # backwards gather
     # solve backward process using paradiag
