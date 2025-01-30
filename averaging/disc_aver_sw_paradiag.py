@@ -532,12 +532,12 @@ Wmsolver = asQ.AllAtOnceSolver(Wmform, Walls,
 
 ### === --- Set up AllAtOnceSolver for backward gather in ns --- === ###
 Xpform = asQ.AllAtOnceForm(Xall, -alpha*dt/ns, theta,
-                           form_mass, get_form_function(upwind=True))
+                           form_mass, get_form_function(upwind=False))
 Xpsolver = asQ.AllAtOnceSolver(Xpform, Xall,
                                solver_parameters=solver_parameters_diag_s,
                                options_prefix="Xpsolver")
 Xmform = asQ.AllAtOnceForm(Xall, alpha*dt/ns, theta,
-                           form_mass, get_form_function(upwind=False))
+                           form_mass, get_form_function(upwind=True))
 Xmsolver = asQ.AllAtOnceSolver(Xmform, Xall,
                                solver_parameters=solver_parameters_diag_s,
                                options_prefix="Xmsolver")
