@@ -176,6 +176,7 @@ hybridscpc_parameters = {
 atol = 1e-10
 rtol = 1e-8
 solver_parameters_diag = {
+    'snes_type': 'ksponly',
     'mat_type': 'matfree',
     'ksp_type': 'fgmres',
     #'snes_converged_reason': None,
@@ -197,12 +198,20 @@ solver_parameters_diag_t = solver_parameters_diag
 solver_parameters_diag_t_half = solver_parameters_diag
 solver_parameters_diag_s = solver_parameters_diag
 
+if args.advection:
+    block_parameters = monoparameters_ns
+else:
+    block_parameters = hybridscpc_parameters
+
+solver_parameters_diag_t['circulant_block'] = block_parameters
+solver_parameters_diag_t_half['circulant_block'] = block_parameters
+solver_parameters_diag_s['circulant_block'] = block_parameters
+
 # set constant_jacobian
 if args.dynamic_ubar:
     constant_jacobian = False
 else:
     constant_jacobian = True
-
 
 ### === --- Experimental setup for Williamson 5  --- === ###
 # setup slice length and check if they are integer
@@ -217,24 +226,6 @@ assert(slice_length_s*args.nslices == ns)
 time_partition_t = [slice_length_t for _ in range(args.nslices)]
 time_partition_t_half = [slice_length_t_half for _ in range(args.nslices)]
 time_partition_s = [slice_length_s for _ in range(args.nslices)]
-
-# # setup parameters for paradiag solve (the number of windows is fixed to 1)
-# if args.advection:
-#     for i in range(sum(time_partition_t)):
-#         solver_parameters_diag_t['circulant_block_'+str(i)+'_'] = monoparameters_ns
-#     for i in range(sum(time_partition_t_half)):
-#         solver_parameters_diag_t_half['circulant_block_'+str(i)+'_'] = monoparameters_ns
-#     for i in range(sum(time_partition_s)):
-#         solver_parameters_diag_s['circulant_block_'+str(i)+'_'] = monoparameters_ns
-#     PETSc.Sys.Print('set monoparameters_ns as solver_parameters_diag')
-# else:
-#     for i in range(sum(time_partition_t)):
-#         solver_parameters_diag_t['circulant_block_'+str(i)+'_'] = hparams
-#     for i in range(sum(time_partition_t_half)):
-#         solver_parameters_diag_t_half['circulant_block_'+str(i)+'_'] = hparams
-#     for i in range(sum(time_partition_s)):
-#         solver_parameters_diag_s['circulant_block_'+str(i)+'_'] = hparams
-#     PETSc.Sys.Print('set hparams as solver_parameters_diag')
 
 # setup ensemble
 ensemble = asQ.create_ensemble(time_partition_t)
@@ -478,7 +469,6 @@ NSolver = LinearVariationalSolver(NProb,
 Wall = asQ.AllAtOnceFunction(ensemble, time_partition_t, W)
 Wallh = asQ.AllAtOnceFunction(ensemble, time_partition_t_half, W)
 Walls = asQ.AllAtOnceFunction(ensemble, time_partition_s, W)
-Walls_new = asQ.AllAtOnceFunction(ensemble, time_partition_s, W)
 Nall = asQ.AllAtOnceFunction(ensemble, time_partition_s, W)
 Nall_new = asQ.AllAtOnceFunction(ensemble, time_partition_s, W)
 Xall = asQ.AllAtOnceFunction(ensemble, time_partition_s, W)
@@ -500,9 +490,6 @@ def get_form_function(upwind=True):
 
 def form_mass(uu, up, vu, vp):
     return (inner(uu, vu) + up * vp) * dx
-
-# def form_mass_r(uu, up, vu, vp):
-#     return (inner(-uu, vu) + -up * vp) * dx
 
 
 ### === --- Set up AllAtOnceSolver for forward nt propagation --- === ###
@@ -543,11 +530,6 @@ Xmsolver = asQ.AllAtOnceSolver(Xmform, Xall,
                                options_prefix="Xmsolver")
 
 ### === --- Setup Ftp/Ftm to be assembled as RHS and used in Xpsolver/Xmsolver --- === ###
-X0 = Function(W)
-X1 = Function(W)
-u0, D0 = split(X0)
-u1, D1 = split(X1)
-
 # exph(L ds) = (1 - ds/2*L)^{-1}(1 + ds/2*L)
 # exph(-L ds) = (1 + ds/2*L)^{-1}(1 - ds/2*L)
 
@@ -626,21 +608,21 @@ def index2rank(index):
             break
     return rank
 
-def data_flip(Nall, Nall_new):
+def data_flip(RHS, RHS_new):
     mpi_requests = []
 
     for ilocal in range(time_partition_s[ensemble_rank]):
-        iglobal = Nall.transform_index(ilocal, from_range='slice', to_range='window')
+        iglobal = RHS.transform_index(ilocal, from_range='slice', to_range='window')
         target = ns-iglobal-1
 
         request_send = ensemble.isend(
-            Nall[ilocal],
+            RHS[ilocal],
             dest=index2rank(target),
             tag=target)
         mpi_requests.extend(request_send)
 
         request_recv = ensemble.irecv(
-            Nall_new[ilocal],
+            RHS_new[ilocal],
             source=index2rank(target),
             tag=iglobal)
         mpi_requests.extend(request_recv)
@@ -907,7 +889,8 @@ etanorm = errornorm(etan, etaini)/norm(etaini)
 unorm = errornorm(un, uini, norm_type="Hdiv")/norm(uini, norm_type="Hdiv")
 PETSc.Sys.Print('etanorm', etanorm, 'unorm', unorm)
 
-#print out timestepping history in the checkpoint file for debug
+
+### === --- Print out timestepping history in the checkpoint file for debug --- === ###
 ensemble.global_comm.Barrier()
 with CheckpointFile(name+".h5", 'r', comm=ensemble.comm) as checkpoint:
     mesh = checkpoint.load_mesh("mesh")
