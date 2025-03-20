@@ -29,6 +29,9 @@ Dt = Constant(0.01)
 
 dtheta, dF = TestFunctions(W)
 
+# dtheta/dt + dF/dx = 0
+# dtheta/dx >=0 , F >= 0
+
 eqn = (
     Pi*(theta1 - theta0)*dtheta
     + Dt*dtheta*F1.dx(0)
