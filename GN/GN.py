@@ -39,14 +39,13 @@ dT = Constant(dt)
 
 dl_dU = variations(Un)
 du, dD = TestFunctions(W)
-w = uh*du.dx(0) - du*uh.dx(0)
 
 dl_dU_h = replace(dl_dU, {un: (un+unp1)/2,
                           Dn: (Dn+Dnp1)/2})
 
 eqn = (unp1 - un)*du*dx + (Dnp1 - Dn)*dD*dx
-eqn += replace(dT*dl_dU_h, {du: w,
-                            dD: (w*Dh).dx(0)})
+eqn += replace(dT*dl_dU_h, {du: uh*du.dx(0) - du*uh.dx(0),
+                            dD: (du*Dh).dx(0)})
 
 problem = NonlinearVariationalProblem(eqn, Unp1)
 solver = NonlinearVariationalSolver(problem)
