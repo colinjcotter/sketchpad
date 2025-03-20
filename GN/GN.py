@@ -7,7 +7,7 @@ mesh = PeriodicIntervalMesh(ncells, L)
 deg = 1
 V = FunctionSpace(mesh, "CG", deg+1)
 Q = FunctionSpace(mesh, "DG", deg)
-W = V * Q
+W = V * Q * V * Q # u, D, F, gamma
 
 # lGN = D|u|^2/2 + D^3*(u')^2/6 + D^2*u'*b_t/2 + D*b_t^2/2 - rhobar*g*(D-2*b)
 
@@ -18,7 +18,7 @@ g = Constant(10)
 rhobar = Constant(1.0)
 
 def variations(U):
-    u, D = split(U)
+    u, D, F, gamma = split(U)
     ell = (
         D*u*u/2 + D**3*u.dx(0)**2/6 + D**2*u.dx(0)*b_t/2
         + D*b_t**2/2 - rhobar*g*D*(D-2*b)
@@ -26,11 +26,14 @@ def variations(U):
     dl_dU = derivative(ell, U)
     return dl_dU
 
+def dl_dU(U, du):
+    
+
 Un = Function(W)
 Unp1 = Function(W)
 
-un, Dn = split(Un)
-unp1, Dnp1 = split(Unp1)
+un, Dn, Fn, gamman = split(Un)
+unp1, Dnp1, Fnp1, gammanp1 = split(Unp1)
 uh = (un + unp1)/2
 Dh = (Dn + Dnp1)/2
 
@@ -45,7 +48,7 @@ dl_dU_h = replace(dl_dU, {un: (un+unp1)/2,
 
 eqn = (unp1 - un)*du*dx + (Dnp1 - Dn)*dD*dx
 eqn += replace(dT*dl_dU_h, {du: uh*du.dx(0) - du*uh.dx(0),
-                            dD: (du*Dh).dx(0)})
+                            dD: dF})
 
 problem = NonlinearVariationalProblem(eqn, Unp1)
 solver = NonlinearVariationalSolver(problem)
