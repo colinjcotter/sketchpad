@@ -45,26 +45,36 @@ bc = DirichletBC(V, 0, "on_boundary")
 butcher_tableau = RadauIIA(args.stages)
 class PQPC(RanaBase):
     def getAtilde(self, A):
-        return np.diag(butcher_tableau.c)
-    
+        prefix = self.options_prefix
+        m = PETSc.Options(prefix).getInt("sdcit")
+        return np.diag(butcher_tableau.c/m)
+
+pcs = ",".join("python" for _ in range(args.stages))
+
 params = {"mat_type": "matfree",
           "snes_type": "ksponly",
           "ksp_type": "gmres",
           "ksp_atol": 1.0e-50,
           "ksp_rtol": 1.0e-5,
-          "pc_type": "python",
+          "ksp_converged_rate": None,
+          "pc_type": "composite",
+          "pc_composite_type": "multiplicative",
+          "pc_composite_pcs": pcs,
           "pc_python_type": "__main__.PQPC",
-          "aux" : 
-          {"pc_type": "fieldsplit",   # block preconditioner
-           "pc_fieldsplit_type": "additive"  # block diagonal
-           }
           }
-    
-per_field = {"ksp_type": "preonly",
-             "pc_type": "lu"}
 
-for s in range(butcher_tableau.num_stages):
-    params["aux_fieldsplit_%s" % (s,)] = per_field
+for n in range(args.stages):
+    params["sub_"+str(n)]= {
+        "pc_python_type": "__main__.PQPC",
+        "aux" :
+        {
+            "sdcit": n+1,
+            "pc_type": "fieldsplit",   # block preconditioner
+            "pc_fieldsplit_type": "additive",  # block diagonal
+            "fieldsplit":  {"ksp_type": "preonly",
+                            "pc_type": "lu"}
+        }
+    }
 
 stepper = TimeStepper(F, butcher_tableau, t, dt, u, bcs=bc,
                       solver_parameters=params)

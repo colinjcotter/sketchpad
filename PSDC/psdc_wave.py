@@ -41,23 +41,56 @@ F = inner(Dt(u0), v)*dx + inner(div(u0), w) * dx + inner(Dt(p0), w)*dx - inner(p
 
 bc = DirichletBC(W.sub(0), as_vector([0, 0]), "on_boundary")
 
+# class PQPC(RanaBase):
+#     def getAtilde(self, A):
+#         return np.diag(butcher_tableau.c)
+
+# params = {"mat_type": "matfree",
+#           "snes_type": "ksponly",
+#           "ksp_type": "gmres",
+#           "ksp_atol": 1.0e-50,
+#           "ksp_rtol": 1.0e-6,
+#           "pc_type": "python",
+#           "pc_python_type": "__main__.PQPC",
+#           "aux" : 
+#           {
+#               "ksp_type": "preonly",
+#               "pc_type": "lu",
+#           }
+#           }
+
 class PQPC(RanaBase):
     def getAtilde(self, A):
-        return np.diag(butcher_tableau.c)
+        prefix = self.options_prefix
+        m = PETSc.Options(prefix).getInt("sdcit")
+        return np.diag(butcher_tableau.c/m)
+
+pcs = ",".join("python" for _ in range(args.stages))
 
 params = {"mat_type": "matfree",
           "snes_type": "ksponly",
           "ksp_type": "gmres",
           "ksp_atol": 1.0e-50,
-          "ksp_rtol": 1.0e-6,
-          "pc_type": "python",
+          "ksp_rtol": 1.0e-5,
+          "ksp_converged_rate": None,
+          "pc_type": "composite",
+          "pc_composite_type": "multiplicative",
+          "pc_composite_pcs": pcs,
           "pc_python_type": "__main__.PQPC",
-          "aux" : 
-          {
-              "ksp_type": "preonly",
-              "pc_type": "lu",
           }
-          }
+
+for n in range(args.stages):
+    params["sub_"+str(n)]= {
+        "pc_python_type": "__main__.PQPC",
+        "aux" :
+        {
+            "sdcit": n+1,
+            #"pc_type": "fieldsplit",   # block preconditioner
+            #"pc_fieldsplit_type": "additive",  # block diagonal
+            #"fieldsplit":  {"ksp_type": "preonly",
+            #                "pc_type": "lu"}
+        }
+    }
 
 stepper = TimeStepper(F, butcher_tableau, t, dt, U, bcs=bc,
                       solver_parameters=params)
