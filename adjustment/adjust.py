@@ -53,9 +53,11 @@ params = {
     "snes_monitor": None,
     "snes_vi_monitor": None,
     "ksp_type": "preonly",
-    "pc_type": "lu",
-    "snes_atol": 1.0e-8,
-    "pc_factor_mat_solver_type": "mumps"
+    "pc_type": "fieldsplit",
+    "pc_fieldsplit_0_fields": "0",
+    "pc_fieldsplit_1_fields": "1",
+    "pc_fieldsplit_type": "additive",
+    "snes_atol": 1.0e-8
 }
 
 solver = NonlinearVariationalSolver(problem,
