@@ -27,6 +27,11 @@ fn = Function(V).interpolate(
     #*(1 + A*cos(k*x))
 )
 
+# remove the mean
+One = Function(V).assign(1.0)
+fbar = assemble(fn*dx)/assemble(One*dx)
+fn -= fbar
+
 # electrostatic potential
 phi = Function(Vbar)
 
@@ -34,22 +39,21 @@ phi = Function(Vbar)
 f_in = Function(V)
 # Solver for electrostatic potential
 psi = TestFunction(Vbar)
-phi_eqn = phi.dx(0)*psi.dx(0)*dx - f_in*psi*dx
 dphi = TrialFunction(Vbar)
+phi_eqn = dphi.dx(0)*psi.dx(0)*dx - H*f_in*psi*dx
 shift_eqn = dphi.dx(0)*psi.dx(0)*dx + dphi*psi*dx
 nullspace = VectorSpaceBasis(constant=True)
-phi_problem = NonlinearVariationalProblem(phi_eqn, phi,
-                                          Jp=shift_eqn
-                                          )
+phi_problem = LinearVariationalProblem(lhs(phi_eqn), rhs(phi_eqn),
+                                       phi, aP=shift_eqn)
 params = {
-    'snes_type': 'ksponly',
     'ksp_type': 'gmres',
     'pc_type': 'lu',
     'ksp_rtol': 1.0e-8,
+    'ksp_monitor': None,
 }
-phi_solver = NonlinearVariationalSolver(phi_problem,
-                                        nullspace=nullspace,
-                                        solver_parameters=params)
+phi_solver = LinearVariationalSolver(phi_problem,
+                                     nullspace=nullspace,
+                                     solver_parameters=params)
 
 dtc = Constant(0)
 
@@ -59,12 +63,13 @@ q = TestFunction(V)
 u = as_vector([v, -phi.dx(0)])
 n = FacetNormal(mesh)
 un = 0.5*(dot(u, n) + abs(dot(u, n)))
-df_eqn = q*df_out*dx
+df = TrialFunction(V)
+df_eqn = q*df*dx
 dS = dS_h + dS_v
 df_eqn += dtc*((inner(u, grad(q))*f_in)*dx
                - (q('+') - q('-'))*(un('+')*f_in('+') - un('-')*f_in('-'))*dS)
-df_problem = NonlinearVariationalProblem(df_eqn, df_out)
-df_solver = NonlinearVariationalSolver(df_problem)
+df_problem = LinearVariationalProblem(lhs(df_eqn), rhs(df_eqn), df_out)
+df_solver = LinearVariationalSolver(df_problem)
 
 T = 10.0 # maximum timestep
 t = 0. # model time
