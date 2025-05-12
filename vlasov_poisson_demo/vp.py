@@ -1,15 +1,21 @@
 from firedrake import *
 
-ncells = 20
+ncells = 50
 L = 2*pi
-H = 6.0
-nlayers = 10
+H = 10.0
+nlayers = 50
 
 # base mesh in x direction
 base_mesh = PeriodicIntervalMesh(ncells, L)
 # extruded mesh in x-v coordinates
 mesh = ExtrudedMesh(base_mesh, layers=nlayers,
                     layer_height=H/nlayers)
+
+# move the mesh in the vertical so v=0 is in the middle
+Vc = mesh.coordinates.function_space()
+x, v = SpatialCoordinate(mesh)
+X = Function(Vc).interpolate(as_vector([x, v-H/2]))
+mesh.coordinates.assign(X)
 
 # Space for the number density
 V = FunctionSpace(mesh, 'DG', 1)
@@ -23,8 +29,8 @@ x, v = SpatialCoordinate(mesh)
 A = Constant(0.05)
 k = Constant(0.5)
 fn = Function(V).interpolate(
-    (v-H/2)**2*exp(-(v-H/2)**2/2)
-    #*(1 + A*cos(k*x))
+    v**2*exp(-v**2/2)
+    *(1 + A*cos(k*x))
 )
 
 # remove the mean
@@ -49,7 +55,7 @@ params = {
     'ksp_type': 'gmres',
     'pc_type': 'lu',
     'ksp_rtol': 1.0e-8,
-    'ksp_monitor': None,
+    #'ksp_monitor': None,
 }
 phi_solver = LinearVariationalSolver(phi_problem,
                                      nullspace=nullspace,
@@ -64,18 +70,21 @@ u = as_vector([v, -phi.dx(0)])
 n = FacetNormal(mesh)
 un = 0.5*(dot(u, n) + abs(dot(u, n)))
 df = TrialFunction(V)
-df_eqn = q*df*dx
+df_a = q*df*dx
 dS = dS_h + dS_v
-df_eqn += dtc*((inner(u, grad(q))*f_in)*dx
-               - (q('+') - q('-'))*(un('+')*f_in('+') - un('-')*f_in('-'))*dS)
-df_problem = LinearVariationalProblem(lhs(df_eqn), rhs(df_eqn), df_out)
+f_bc = Function(V).assign(0.)
+df_L = dtc*(div(u*q)*f_in*dx
+             - (q('+') - q('-'))*(un('+')*f_in('+') - un('-')*f_in('-'))*dS
+            - conditional(dot(u, n) > 0, q*dot(u, n)*f_in, 0.)*ds_tb
+            )
+df_problem = LinearVariationalProblem(df_a, df_L, df_out)
 df_solver = LinearVariationalSolver(df_problem)
 
-T = 10.0 # maximum timestep
+T = 1.0 # maximum timestep
 t = 0. # model time
 ndump = 10
 dumpn = 0
-nsteps = 10000
+nsteps = 1000
 dt = T/nsteps
 dtc.assign(dt)
 
