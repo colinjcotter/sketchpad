@@ -6,7 +6,7 @@ H = 6.0
 nlayers = 10
 
 # base mesh in x direction
-base_mesh = IntervalMesh(ncells, L)
+base_mesh = PeriodicIntervalMesh(ncells, L)
 # extruded mesh in x-v coordinates
 mesh = ExtrudedMesh(base_mesh, layers=nlayers,
                     layer_height=H/nlayers)
@@ -23,7 +23,9 @@ x, v = SpatialCoordinate(mesh)
 A = Constant(0.05)
 k = Constant(0.5)
 fn = Function(V).interpolate(
-    (v-H/2)**2*exp(-(v-H/2)**2/2)*(1 + A*cos(k*x)))
+    (v-H/2)**2*exp(-(v-H/2)**2/2)
+    #*(1 + A*cos(k*x))
+)
 
 # electrostatic potential
 phi = Function(Vbar)
@@ -37,7 +39,8 @@ dphi = TrialFunction(Vbar)
 shift_eqn = dphi.dx(0)*psi.dx(0)*dx + dphi*psi*dx
 nullspace = VectorSpaceBasis(constant=True)
 phi_problem = NonlinearVariationalProblem(phi_eqn, phi,
-                                          Jp=shift_eqn)
+                                          Jp=shift_eqn
+                                          )
 params = {
     'snes_type': 'ksponly',
     'ksp_type': 'gmres',
@@ -95,7 +98,7 @@ for step in ProgressBar("Timestep").iter(range(nsteps)):
     f_in.assign(f2)
     phi_solver.solve()
     df_solver.solve()
-    fn.assign(fn/3 + 2*(f1 + df_out)/3)
+    fn.assign(fn/3 + 2*(f2 + df_out)/3)
 
     t += dt
     dumpn += 1
