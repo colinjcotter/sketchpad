@@ -1,7 +1,7 @@
 from firedrake import *
 
 ncells = 50
-L = 2*pi
+L = 4*pi
 H = 10.0
 nlayers = 50
 
@@ -30,13 +30,12 @@ A = Constant(0.05)
 k = Constant(0.5)
 fn = Function(V).interpolate(
     v**2*exp(-v**2/2)
-    *(1 + A*cos(k*x))
+    *(1 + A*cos(k*x))/(2*pi)**0.5
 )
 
 # remove the mean
 One = Function(V).assign(1.0)
 fbar = assemble(fn*dx)/assemble(One*dx)
-fn -= fbar
 
 # electrostatic potential
 phi = Function(Vbar)
@@ -46,7 +45,7 @@ f_in = Function(V)
 # Solver for electrostatic potential
 psi = TestFunction(Vbar)
 dphi = TrialFunction(Vbar)
-phi_eqn = dphi.dx(0)*psi.dx(0)*dx - H*f_in*psi*dx
+phi_eqn = dphi.dx(0)*psi.dx(0)*dx - H*(f_in-fbar)*psi*dx
 shift_eqn = dphi.dx(0)*psi.dx(0)*dx + dphi*psi*dx
 nullspace = VectorSpaceBasis(constant=True)
 phi_problem = LinearVariationalProblem(lhs(phi_eqn), rhs(phi_eqn),
@@ -80,11 +79,11 @@ df_L = dtc*(div(u*q)*f_in*dx
 df_problem = LinearVariationalProblem(df_a, df_L, df_out)
 df_solver = LinearVariationalSolver(df_problem)
 
-T = 1.0 # maximum timestep
+T = 50.0 # maximum timestep
 t = 0. # model time
-ndump = 10
+ndump = 100
 dumpn = 0
-nsteps = 1000
+nsteps = 5000
 dt = T/nsteps
 dtc.assign(dt)
 
