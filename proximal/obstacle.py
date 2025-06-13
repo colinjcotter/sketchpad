@@ -17,6 +17,7 @@ obstacle *= conditional(le(x, 0.75), 1.0, 0.0)
 obstacle *= conditional(ge(y, 0.25), 1.0, 0.0)
 obstacle *= conditional(le(y, 0.75), 1.0, 0.0)
 
+
 VV = FunctionSpace(mesh, "DG", 1)
 obstacle = Function(VV).interpolate(obstacle*1.0e-1)
 
