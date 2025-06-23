@@ -19,7 +19,7 @@ obstacle *= conditional(le(y, 0.75), 1.0, 0.0)
 
 
 VV = FunctionSpace(mesh, "DG", 1)
-obstacle = Function(VV).interpolate(obstacle*1.0e-1)
+obstacle = Function(VV).interpolate(obstacle*0.15)
 
 alpha = Constant(1.0)
 
@@ -47,13 +47,14 @@ solver = NonlinearVariationalSolver(prob, solver_parameters=
                                     solver_parameters)
 
 res = 1.0e50
-tol = 1.0e-3
+tol = 1.0e-6
 
 while res > tol:
     solver.solve()
     res = norm(u-u_prev)
     up_prev.assign(up)
 
+    alpha.assign(alpha*1.0e-1)
     print(res)
 
 u, psi = up.subfunctions
