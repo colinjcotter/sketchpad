@@ -16,16 +16,23 @@ v, phi = TestFunctions(W)
 
 x, y = SpatialCoordinate(mesh)
 
+obstacle = conditional(ge(x, 0.25), 1.0, 0.0)
+obstacle *= conditional(le(x, 0.75), 1.0, 0.0)
+obstacle *= conditional(ge(y, 0.25), 1.0, 0.0)
+obstacle *= conditional(le(y, 0.75), 1.0, 0.0)
+
 eqn = (
     inner(grad(u), grad(v))*dx
     + smooth_abs(grad(u), exp(psi))*v*dx
-    - v*dx
+    - obstacle*v*dx
     + exp(psi)*phi*dx
 )
 
 u, psi = w.subfunctions
+u.assign(1.0)
 
-bcs = [DirichletBC(W.sub(0), 0., "on_boundary")]
+bcs = [DirichletBC(W.sub(0), 0., "on_boundary"),
+       DirichletBC(W.sub(1), 0., "on_boundary")]
 
 prob = NonlinearVariationalProblem(eqn, w, bcs=bcs)
 parameters = {'snes_monitor': None,
