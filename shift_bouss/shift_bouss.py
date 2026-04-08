@@ -4,8 +4,8 @@ nz = 100
 nx = 100
 length = 3.0e5
 height = 1.0e3
-dt = Constant(100)
-shift = Constant(1.0)
+dt = Constant(10000)
+shift = Constant(1.0e-1)
 Nsq = Constant(1.0e-4)
 
 m = PeriodicIntervalMesh(nx, length)
