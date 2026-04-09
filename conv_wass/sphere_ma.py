@@ -22,15 +22,15 @@ if problem == 1:
     mu_exp = ((1-gamma)*0.5*(tanh((beta-mabs(x-xc))/alpha)+1)
               + gamma)**0.5
 else:
-    alpha = Constant(10)
+    alpha = Constant(50)
     beta = Constant(5)
     x1 = as_vector([sqrt(3)/2, 0, 0.5])
     x2 = as_vector([-sqrt(3)/2, 0, 0.5])
     def sech(x):
         return 1/cosh(x)
 
-    mu_exp = 1 + alpha*sech(beta*(inner(x-x1,x-x1)-(pi/2)**2))**2 \
-        + alpha*sech(beta*(inner(x-x2,x-x2)-(pi/2)**2))**2
+    mu_exp = 1 + alpha*(sech(beta*(inner(x-x1,x-x1)-(pi/2)**2)))**2 \
+        + alpha*(sech(beta*(inner(x-x2,x-x2)-(pi/2)**2)))**2
 
 mu1 = Function(V, name="mu1").interpolate(mu_exp)
 VTKFile("mu.pvd").write(mu0, mu1)
@@ -38,7 +38,7 @@ VTKFile("mu.pvd").write(mu0, mu1)
 mu0.assign(mu0/assemble(mu0*dx))
 mu1.assign(mu1/assemble(mu1*dx))
 
-eps = Constant(0.05)
+eps = Constant(0.01)
 gam0 = eps**0.5
 
 u = TrialFunction(V)
@@ -58,7 +58,7 @@ Ht_problem = LinearVariationalProblem(a, Lw, u1)
 Ht_solver = LinearVariationalSolver(Ht_problem)
 
 res = 10000
-tol = 1.0e-2
+tol = 2.e-2
 while res > tol:
     u0.assign(w)
     for step in range(nsteps):
