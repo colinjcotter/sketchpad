@@ -1,7 +1,7 @@
 from firedrake import *
 
 mesh = IcosahedralSphereMesh(radius=1, refinement_level=4)
-deg = 2
+deg = 3
 V = FunctionSpace(mesh, "CG", deg)
 
 x = SpatialCoordinate(mesh)
@@ -22,15 +22,21 @@ if problem == 1:
     mu_exp = ((1-gamma)*0.5*(tanh((beta-mabs(x-xc))/alpha)+1)
               + gamma)**0.5
 else:
-    alpha = Constant(50)
+    alpha = Constant(10)
     beta = Constant(5)
     x1 = as_vector([sqrt(3)/2, 0, 0.5])
     x2 = as_vector([-sqrt(3)/2, 0, 0.5])
-    def sech(x):
-        return 1/cosh(x)
+    def sech2(x):
+        return 1/cosh(x)**2
 
-    mu_exp = 1 + alpha*(sech(beta*(inner(x-x1,x-x1)-(pi/2)**2)))**2 \
-        + alpha*(sech(beta*(inner(x-x2,x-x2)-(pi/2)**2)))**2
+#Expression("1.0 + alpha1*pow(cosh(alpha2*(pow(acos(x0*x[0] + x1*x[1] + x2*x[2]), 2) - a*a)), -2) + alpha3*pow(cosh(alpha4*(pow(acos(y0*x[0] + y1*x[1] + y2*x[2]), 2) - a*a)), -2)",
+#           a=math.pi/2, alpha1=10, alpha2=5, alpha3=10,
+#           alpha4=5, x0=0.86602540378, x1=0.0, x2=0.5, y0=-0.86602540378, y1=0.0, y2=0.5)
+    
+    mu_exp = (1
+              + alpha*sech2(beta*(acos(inner(x,x1))**2-(pi/2)**2))
+              + alpha*sech2(beta*(acos(inner(x,x2))**2-(pi/2)**2))
+              )
 
 mu1 = Function(V, name="mu1").interpolate(mu_exp)
 VTKFile("mu.pvd").write(mu0, mu1)
@@ -38,8 +44,8 @@ VTKFile("mu.pvd").write(mu0, mu1)
 mu0.assign(mu0/assemble(mu0*dx))
 mu1.assign(mu1/assemble(mu1*dx))
 
-eps = Constant(0.01)
-gam0 = eps**0.5
+eps = Constant(0.05)
+gam0 = eps
 
 u = TrialFunction(V)
 du = TestFunction(V)
@@ -58,7 +64,8 @@ Ht_problem = LinearVariationalProblem(a, Lw, u1)
 Ht_solver = LinearVariationalSolver(Ht_problem)
 
 res = 10000
-tol = 2.e-2
+tol = 5.e-2
+count = 0
 while res > tol:
     u0.assign(w)
     for step in range(nsteps):
@@ -73,7 +80,8 @@ while res > tol:
     resw = norm(w-mu1/u0)
     w.interpolate(mu1/u0)
     res = max(resv, resw)
-    print(res)
+    count +=1 
+    print(res, count)
 
 # moving the mesh
 phi = Function(V, name="phi").interpolate(-gam0*ln(v))
