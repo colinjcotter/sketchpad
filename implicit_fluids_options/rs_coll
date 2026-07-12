@@ -1,0 +1,45 @@
+-model_dt 3600
+-model_tmax 86400
+-stepper_time_method galerkin
+-stepper_time_variant collocation
+-stepper_time_order 2
+-stepper_time_quadrature_degree 2
+-stepper_ksp_type fgmres
+-stepper_pc_type python
+-stepper_pc_python_type irksome.RanaLD
+-stepper_aux_pc_type fieldsplit
+-stepper_aux_pc_fieldsplit_type multiplicative
+-stepper_aux_fieldsplit_pc_type mg
+-stepper_aux_fieldsplit_pc_mg_cycle_type v
+-stepper_aux_fieldsplit_pc_mg_type multiplicative
+-stepper_aux_fieldsplit_mg_coarse_ksp_type preonly
+-stepper_aux_fieldsplit_mg_coarse_pc_type python
+-stepper_aux_fieldsplit_mg_coarse_pc_python_type firedrake.AssembledPC
+-stepper_aux_fieldsplit_mg_coarse_assembled_pc_type lu
+-stepper_aux_fieldsplit_mg_coarse_assembled_pc_factor_mat_solver_type mumps
+-stepper_aux_fieldsplit_mg_coarse_assembled_mat_mumps_icntl_47 1
+-stepper_aux_fieldsplit_mg_levels_ksp_type gmres
+-stepper_aux_fieldsplit_mg_levels_ksp_max_it 1
+-stepper_aux_fieldsplit_mg_levels_pc_type python
+-stepper_aux_fieldsplit_mg_levels_pc_python_type firedrake.AssembledPC
+-stepper_aux_fieldsplit_mg_levels_assembled_pc_type python
+-stepper_aux_fieldsplit_mg_levels_assembled_pc_python_type firedrake.ASMStarPC
+-stepper_aux_fieldsplit_mg_levels_assembled_pc_star_sub_sub_pc_type lu
+-stepper_aux_fieldsplit_mg_levels_assembled_pc_star_sub_sub_ksp_type preonly
+-stepper_aux_fieldsplit_mg_levels_assembled_pc_star_construct_dim 0
+-stepper_snes_ksp_ew
+-stepper_snes_atol 0.
+-stepper_snes_stol 0.
+-stepper_snes_rtol 1.0e-12
+-stepper_snes_monitor
+-stepper_ksp_monitor
+-filename w6
+-testcase w6
+-vtkfreq 48
+-chkptfreq 0
+-testcase_mesh_nrefs 4
+-testcase_mesh_baserefs 2
+-testcase_mesh_degree 2
+-testcase_mesh_starpatch
+-model_projection
+-model_quadrature_degree 6
