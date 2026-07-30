@@ -77,10 +77,9 @@ MC = irksome.MeshConstant(mesh)
 dT = MC.Constant(dt)
 t = MC.Constant(0.)
 
-solver_parameters = {}
-
 scheme_J = irksome.GalerkinCollocationScheme(order=1)
 stepper = irksome.TimeStepper(eqn, method, t, dT, U,
+                              options_prefix="stepper",
                               scheme_J=scheme_J)
 
 nsteps = 50
@@ -90,7 +89,7 @@ v, Iu, G, D = U.subfunctions
 eta = Function(Q).interpolate(D+b)
 file.write(v, eta)
 
-for step in fd.ProgressBar('Timestep').iter(range(nsteps)):
+for step in ProgressBar('Timestep').iter(range(nsteps)):
     stepper.advance()
 
     file.write(v, eta)
