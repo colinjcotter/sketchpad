@@ -9,11 +9,11 @@ stepper:
     atol: 0.
     stol: 0.
     rtol: 1.0e-7
-    monitor:ascii:monitors.txt
+    monitor: ascii:monitors.txt
   ksp:
     type: fgmres
     view: ascii:mono_ksp_view.txt
-    monitor:ascii:monitors.txt
+    monitor: ascii:monitors.txt
   pc:
     type: mg
     mg:
