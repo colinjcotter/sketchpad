@@ -1,6 +1,5 @@
 ---
 stepper:
-  mat_type: matfree
   time:
     order: 1
     quadrature:
@@ -9,12 +8,12 @@ stepper:
     ksp_ew:
     atol: 0.
     stol: 0.
-    rtol: 1.0e-12
-    monitor: ascii:mono_snes.txt
+    rtol: 1.0e-7
+    monitor:ascii:monitors.txt
   ksp:
     type: fgmres
     view: ascii:mono_ksp_view.txt
-    monitor: ascii:mono_ksp.txt
+    monitor:ascii:monitors.txt
   pc:
     type: mg
     mg:
@@ -25,24 +24,16 @@ stepper:
       ksp:
         type: preonly
       pc:
-        type: python
-        python_type: firedrake.AssembledPC
-      assembled:
-        pc:
-          type: lu
-          precision: single
-          factor_mat_solver_type: mumps
+        type: lu
+        precision: single
+        factor_mat_solver_type: mumps
     levels:
       ksp:
         type: gmres
         max_it: 3
       pc:
         type: python
-        python_type: firedrake.AssembledPC
-      assembled:
-        pc:
-          type: python
-          python_type: firedrake.ASMStarPC
-          star_sub_sub_pc_type: lu
-          star_sub_sub_pc_factor_mat_ordering_type: rcm
-          star_construct_dim: 0
+        python_type: firedrake.ASMStarPC
+        star_sub_sub_pc_type: lu
+        star_sub_sub_pc_factor_mat_ordering_type: nd
+        star_construct_dim: 0
