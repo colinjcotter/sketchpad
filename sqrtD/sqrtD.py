@@ -1,5 +1,5 @@
 from firedrake import *
-from irksome import *
+import irksome
 
 nx = 100
 L = 100000
@@ -16,6 +16,7 @@ f = Constant(1e-4)
 g = Constant(10)
 H = Constant(1000)
 alpha = Constant(1000)
+dt = 100.
 
 n = FacetNormal(mesh)
 
@@ -29,6 +30,7 @@ _, _, _, D = U.subfunctions
 D.interpolate(H-b)
 
 # equation system
+Dt = irksome.Dt
 dv, du, dG, dD = TestFunctions(W)
 v, Iu, G, D = split(U)
 u = Dt(Iu)
@@ -63,3 +65,32 @@ eqn += inner(F - D*u, dG)*dx
 
 # D transport
 eqn += dD*(Dt(D) + div(F))*dx
+
+# building a timestepper
+method = irksome.GalerkinCollocationScheme(
+    order=1,
+    stage_type="deriv",
+    quadrature_degree = 10,
+    max_quadrature_degree = 10)
+
+MC = irksome.MeshConstant(mesh)
+dT = MC.Constant(dt)
+t = MC.Constant(0.)
+
+solver_parameters = {}
+
+scheme_J = irksome.GalerkinCollocationScheme(order=1)
+stepper = irksome.TimeStepper(eqn, method, t, dT, U,
+                              scheme_J=scheme_J)
+
+nsteps = 50
+
+file = VTKFile('sqrtD.pvd')
+v, Iu, G, D = U.subfunctions
+eta = Function(Q).interpolate(D+b)
+file.write(v, eta)
+
+for step in fd.ProgressBar('Timestep').iter(range(nsteps)):
+    stepper.advance()
+
+    file.write(v, eta)
