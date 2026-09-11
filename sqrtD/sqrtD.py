@@ -2,9 +2,15 @@ from firedrake import *
 import irksome
 
 nx = 10
-L = 100000
-mesh = PeriodicSquareMesh(nx, nx, L)
-mh = MeshHierarchy(mesh, 3)
+ny = 1
+Lx = 200
+Ly = 10
+dps = {"partition": True, "overlap_type":
+       (DistributedMeshOverlapType.VERTEX, 2)}
+mesh = RectangleMesh(nx, ny, Lx, Ly, originX=-Lx/2,
+                     distribution_parameters=dps)
+nrefs = 3
+mh = MeshHierarchy(mesh, nrefs)
 mesh = mh[-1]
 
 V = FunctionSpace(mesh, "BDM", 2)
@@ -14,12 +20,14 @@ Q = FunctionSpace(mesh, "DG", 1)
 W = V * V * V * Q
 
 # model parameters
-L = Constant(L)
-f = Constant(1e-4)
-g = Constant(10)
-H = Constant(L/20)
-alpha = Constant(L/9)
-dt = Constant(0.5*L/nx/sqrt(g*H))
+L = Constant(Lx)
+f = Constant(0.)
+g = Constant(1)
+H = Constant(10)
+alpha = Constant(1)
+c = 5
+# C_Tr = c*dt/dx so dt = C_tr*dx/c
+dt = Constant(0.2*L/nx/nrefs/c)
 
 n = FacetNormal(mesh)
 
@@ -29,9 +37,25 @@ b = Function(Q).interpolate(0.)
 U = Function(W)
 
 # initial conditions
-_, _, _, D = U.subfunctions
+v, _, _, D = U.subfunctions
 x, y = SpatialCoordinate(mesh)
-D.interpolate(H-b + 0.01*exp(-((x-L/2)**2 + (y-L/2)**2)/2/(L/9)**2))
+
+def sech(s):
+    return 2/(exp(s) + exp(-s)) 
+
+t0 = 0
+
+D.interpolate(H*(1 + (c**2/(g*H) - 1))*
+              sech(sqrt(3*(c**2-g*H))*(x - c*t0)/(2*c*H))**2)
+
+u = Function(V).interpolate(as_vector([c*(1-H/D),0]))
+F = Function(V).project(u*D)
+
+du = TestFunction(V)
+v0 = Function(V)
+veqn = (inner(u-v0, du) + (2/3)*alpha**2*div(du)*div(F)/D)*dx
+solve(veqn == 0, v0)
+v.assign(v0)
 
 # equation system
 Dt = irksome.Dt
@@ -83,9 +107,17 @@ MC = irksome.MeshConstant(mesh)
 dT = MC.Constant(dt)
 t = MC.Constant(0.)
 
-scheme_J = irksome.GalerkinCollocationScheme(order=1)
+# v, Iu, G, D, Iu is the time integral of u
+ZeroV = Constant(as_vector([0,0]))
+bcs = [
+    DirichletBC(W.sub(0), ZeroV, "on_boundary"),
+    DirichletBC(W.sub(1), ZeroV, "on_boundary"),
+    DirichletBC(W.sub(2), ZeroV, "on_boundary"),
+]
+
 stepper = irksome.TimeStepper(eqn, method, t, dT, U,
-                              options_prefix="stepper", scheme_J=scheme_J)
+                              options_prefix="stepper",
+                              bcs=bcs)
 
 # coupled solver to construct u again for energy diagnostic
 VV = V * V
@@ -104,13 +136,14 @@ uFsolver = NonlinearVariationalSolver(uFproblem,
                                       options_prefix="stepper")
 
 nsteps = 200
-tdump = 10
+tdump = 1
 dumpt = 0
 
 file = VTKFile('sqrtD.pvd')
-v, Iu, G, D = U.subfunctions
-eta = Function(Q).interpolate(D+b)
-file.write(v, eta)
+_, _, _, D = split(U)
+eta = Function(Q, name="Elevation").interpolate(D+b)
+v, _, _, D = U.subfunctions
+file.write(v, D, eta)
 
 energy = []
 
@@ -134,4 +167,4 @@ for step in ProgressBar('Timestep').iter(range(nsteps)):
         energy.append(energy0)
         v, Iu, G, D = U.subfunctions
         eta.interpolate(D+b)
-        file.write(v, eta)
+        file.write(v, D, eta)
