@@ -38,6 +38,7 @@ parser.add_argument('--paradiag_fs', action="store_true", help='Use paradiag for
 parser.add_argument('--paradiag_n', action="store_true", help='Use paradiag for nonlinear operator')
 parser.add_argument('--paradiag_nf', action="store_true", help='Use paradiag for nonlinear operator and forward in serial by flipping')
 parser.add_argument('--paradiag_X', action="store_true", help='Use paradiag for backward gather')
+parser.add_argument('--serial_forward_n', action="store_true", help='Use paradiag for backward gather')
 parser.add_argument('--constant_jacobian', action="store_true", help='Use constant_jacobian option for faster calculation')
 
 args = parser.parse_known_args()
@@ -342,6 +343,9 @@ if args.advection:
     F0p += dt_ss*advection(uh, ubar, v, vector=True, upwind=False)
     F0p += dt_ss*advection(Dh, ubar, phi, vector=False,
                            continuity=True, upwind=False)
+
+uh = (u0+u)/2
+Dh = (D0+D)/2
 
 dt_ss = -dt_s
 # negative s outward  propagation
@@ -754,6 +758,8 @@ V = Function(W)
 dVdt = Function(W)
 Average = Function(W)
 
+N_forward_serial = [Function(W) for _ in range(ns)]
+
 def average(V, Average, t=None):
     get_dVdt(V, dVdt, positive=True, t=t)
     W1.assign(dVdt)
@@ -788,6 +794,16 @@ def get_dVdt(V, dVdt, positive=True, t=None):
                     forwardp_expsolver.solve()
                 else:
                     forwardm_expsolver.solve()
+
+            if args.serial_forward_n:
+                # W1 is now W_{step+1}
+                NSolver.solve()
+
+                # index 0 = N(W_1)
+                # ...
+                # index ns-1 = N(W_ns)
+                N_forward_serial[step].assign(N)
+
             W0.assign(W1)
 
     if paradiag_n or paradiag_nf:
@@ -862,9 +878,15 @@ def get_dVdt(V, dVdt, positive=True, t=None):
         # solve backward process in serial without paradiag
         X1.assign(0.)
         for step in ProgressBar(f'average backward').iter(range(ns, 0, -1)):
-            # compute N
-            with PETSc.Log.Event("nonlinearity"):
-                NSolver.solve()
+
+            if args.serial_forward_n:
+                # assign N
+                N.assign(N_forward_serial[step-1])
+            else:
+                # compute N
+                with PETSc.Log.Event("nonlinearity"):
+                    NSolver.solve()
+
             # propagate X back
             with PETSc.Log.Event("backward integration"):
                 w_k.assign(weights[step])
@@ -873,14 +895,17 @@ def get_dVdt(V, dVdt, positive=True, t=None):
                 else:
                     Xmsolver_serial.solve()
             X1.assign(X0)
-            # back propagate W
-            if step > 0:
-                with PETSc.Log.Event("backward propagation ds"):
-                    if positive:
-                        backwardp_expsolver.solve()
-                    else:
-                        backwardm_expsolver.solve()
-                W1.assign(W0)
+
+            if not args.serial_forward_n:
+                # back propagate W
+                if step > 0:
+                    with PETSc.Log.Event("backward propagation ds"):
+                        if positive:
+                            backwardp_expsolver.solve()
+                        else:
+                            backwardm_expsolver.solve()
+                    W1.assign(W0)
+
         # copy contents
         dVdt.assign(X0)
 
@@ -992,6 +1017,19 @@ etaini = Function(V2, name="Elevation0").interpolate(eta_expr)
 etanorm = errornorm(etan, etaini)/norm(etaini)
 unorm = errornorm(un, uini, norm_type="Hdiv")/norm(uini, norm_type="Hdiv")
 print('etanorm', etanorm, 'unorm', unorm)
+
+
+##############################################################################
+# Debug before time loop
+##############################################################################
+
+# # set up initial conditions
+# U0 = Function(W)
+# U_u, U_D = U0.subfunctions
+# U_u.assign(un)
+# U_D.assign(Dn)
+
+# Vtest = Function(W).assign(U0)
 
 ##############################################################################
 # Time loop
