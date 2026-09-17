@@ -36,9 +36,10 @@ parser.add_argument('--alphap', type=float, default=0.0001, help='Circulant coef
 parser.add_argument('--paradiag_dt', action="store_true", help='Use paradiag for propagate solve')
 parser.add_argument('--paradiag_fs', action="store_true", help='Use paradiag for forward scatter')
 parser.add_argument('--paradiag_n', action="store_true", help='Use paradiag for nonlinear operator')
+parser.add_argument('--paradiag_backward_n', action="store_true", help='Use paradiag for nonlinear operator using W from backward propagation')
 parser.add_argument('--paradiag_nf', action="store_true", help='Use paradiag for nonlinear operator and forward in serial by flipping')
 parser.add_argument('--paradiag_X', action="store_true", help='Use paradiag for backward gather')
-parser.add_argument('--serial_forward_n', action="store_true", help='Use paradiag for backward gather')
+parser.add_argument('--serial_forward_n', action="store_true", help='Use W from forward propagation for backward gather')
 parser.add_argument('--constant_jacobian', action="store_true", help='Use constant_jacobian option for faster calculation')
 
 args = parser.parse_known_args()
@@ -49,8 +50,10 @@ timestepping = args.timestepping
 paradiag_dt = args.paradiag_dt
 paradiag_fs = args.paradiag_fs
 paradiag_n = args.paradiag_n
+paradiag_backward_n = args.paradiag_backward_n
 paradiag_nf = args.paradiag_nf
 paradiag_X = args.paradiag_X
+serial_forward_n = args.serial_forward_n
 
 print(args)
 
@@ -759,6 +762,7 @@ dVdt = Function(W)
 Average = Function(W)
 
 N_forward_serial = [Function(W) for _ in range(ns)]
+W_backward_serial = [Function(W) for _ in range(ns)]
 
 def average(V, Average, t=None):
     get_dVdt(V, dVdt, positive=True, t=t)
@@ -795,7 +799,7 @@ def get_dVdt(V, dVdt, positive=True, t=None):
                 else:
                     forwardm_expsolver.solve()
 
-            if args.serial_forward_n:
+            if serial_forward_n:
                 # W1 is now W_{step+1}
                 NSolver.solve()
 
@@ -806,29 +810,53 @@ def get_dVdt(V, dVdt, positive=True, t=None):
 
             W0.assign(W1)
 
-    if paradiag_n or paradiag_nf:
+    if paradiag_backward_n:
+        # W1 already contains W_ns from
+        # Walls.bcast_field(-1, W1)
+
+        # store backward-reconstructed states
+        for step in range(ns, 0, -1):
+            W_backward_serial[step-1].assign(W1)
+            if positive:
+                backwardp_expsolver.solve()
+            else:
+                backwardm_expsolver.solve()
+
+            W1.assign(W0)
+
+        # now compute N from stored backward states
+        for ilocal in range(time_partition_s[ensemble_rank]):
+
+            iglobal = Nall.transform_index(
+                ilocal,
+                from_range='slice',
+                to_range='window'
+            )
+
+            # iglobal = 0 corresponds to W_1
+            W1.assign(W_backward_serial[iglobal])
+            NSolver.solve()
+            Nall[ilocal].assign(N)
+
+    elif paradiag_n or paradiag_nf or paradiag_X:
         for step in range(time_partition_s[ensemble_rank]):
             # compute N and store them in Nall
             W1.assign(Walls[step])
             NSolver.solve()
             Nall[step].assign(N)
 
+    # backwards gather
     if paradiag_X:
-        # preparation for backward gather
         for step in range(time_partition_s[ensemble_rank]):
-            # compute N and store them in Nall
-            W1.assign(Walls[step])
-            NSolver.solve()
-            Nall[step].assign(N)
             # compute RHS
-            step_W = Walls.transform_index(step, from_range='slice', to_range='window')
+            N.assign(Nall[step])
+            step_W = Nall.transform_index(step, from_range='slice', to_range='window')
             w_k.assign(weights[step_W+1])
             if positive:
                 assemble(-Ftp, tensor=RHS[step])
             else:
                 assemble(-Ftm, tensor=RHS[step])
 
-        # backwards gather
         # solve backward process using paradiag
         Xall.zero()
         # flip the data in RHS
@@ -856,6 +884,7 @@ def get_dVdt(V, dVdt, positive=True, t=None):
             X1.assign(X0)
         # copy contents
         dVdt.assign(X0)
+
     elif paradiag_nf:
         # solve backward process using Nall and flipping to solve forward in serial
         X1.assign(0.)
@@ -874,12 +903,13 @@ def get_dVdt(V, dVdt, positive=True, t=None):
             X1.assign(X0)
         # copy contents
         dVdt.assign(X0)
+
     else:
         # solve backward process in serial without paradiag
         X1.assign(0.)
         for step in ProgressBar(f'average backward').iter(range(ns, 0, -1)):
 
-            if args.serial_forward_n:
+            if serial_forward_n:
                 # assign N
                 N.assign(N_forward_serial[step-1])
             else:
@@ -896,7 +926,7 @@ def get_dVdt(V, dVdt, positive=True, t=None):
                     Xmsolver_serial.solve()
             X1.assign(X0)
 
-            if not args.serial_forward_n:
+            if not serial_forward_n:
                 # back propagate W
                 if step > 0:
                     with PETSc.Log.Event("backward propagation ds"):
