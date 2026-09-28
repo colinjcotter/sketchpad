@@ -40,7 +40,14 @@ parser.add_argument('--paradiag_backward_n', action="store_true", help='Use para
 parser.add_argument('--paradiag_nf', action="store_true", help='Use paradiag for nonlinear operator and forward in serial by flipping')
 parser.add_argument('--paradiag_X', action="store_true", help='Use paradiag for backward gather')
 parser.add_argument('--serial_forward_n', action="store_true", help='Use W from forward propagation for backward gather')
+parser.add_argument('--serial_one_backward_n', action="store_true", help='Evaluate N using one backward step from the next forward state')
 parser.add_argument('--constant_jacobian', action="store_true", help='Use constant_jacobian option for faster calculation')
+parser.add_argument('--ksp_atol_s', type=float, default=1e-8, help='ksp_atol for serial ns solves')
+parser.add_argument('--ksp_rtol_s', type=float, default=1e-8, help='ksp_rtol for serial ns solves')
+parser.add_argument('--ksp_atol_t', type=float, default=1e-8, help='ksp_atol for serial nt solves')
+parser.add_argument('--ksp_rtol_t', type=float, default=1e-8, help='ksp_rtol for serial nt solves')
+parser.add_argument('--theta', type=float, default=0.5, help='Off-centring parameter for upwind propagation; downwind uses 1-theta')
+parser.add_argument('--direct_s', action='store_true')
 
 args = parser.parse_known_args()
 args = args[0]
@@ -54,6 +61,16 @@ paradiag_backward_n = args.paradiag_backward_n
 paradiag_nf = args.paradiag_nf
 paradiag_X = args.paradiag_X
 serial_forward_n = args.serial_forward_n
+serial_one_backward_n = args.serial_one_backward_n
+
+if serial_one_backward_n:
+    assert not paradiag_fs
+    assert not paradiag_n
+    assert not paradiag_backward_n
+    assert not paradiag_nf
+    assert not paradiag_X
+
+assert not (serial_forward_n and serial_one_backward_n)
 
 print(args)
 
@@ -74,6 +91,7 @@ dts = alpha*dt/args.ns
 dt_s = Constant(dts)
 ns = args.ns
 nt = args.nt
+theta = Constant(args.theta)
 
 if nt % 2 == 1:
     print('nt is an odd number. exit')
@@ -133,8 +151,8 @@ monoparameters_ns = {
     #'ksp_monitor': None,
     #"ksp_monitor_true_residual": None,
     #"ksp_converged_reason": None,
-    "ksp_atol": 1e-8,
-    "ksp_rtol": 1e-8,
+    "ksp_atol": args.ksp_atol_s,
+    "ksp_rtol": args.ksp_rtol_s,
     "ksp_max_it": 40,
     "pc_type": "python",
     "pc_python_type": "firedrake.PatchPC",
@@ -160,8 +178,8 @@ monoparameters_nt = {
     #'ksp_monitor': None,
     #"ksp_monitor_true_residual": None,
     #"ksp_converged_reason": None,
-    "ksp_atol": 1e-8,
-    "ksp_rtol": 1e-8,
+    "ksp_atol": args.ksp_atol_t,
+    "ksp_rtol": args.ksp_rtol_t,
     "ksp_max_it": 40,
     "pc_type": "python",
     "pc_python_type": "firedrake.PatchPC",
@@ -194,8 +212,8 @@ time_partition_t_half = [slice_length_t_half for _ in range(args.nslices)]
 time_partition_s = [slice_length_s for _ in range(args.nslices)]
 
 # setup parameters for paradiag solve (the number of windows is fixed to 1)
-atol = 1e-10
-rtol = 1e-8
+paradiag_atol = 1e-10
+paradiag_rtol = 1e-8
 solver_parameters_diag = {
     'snes_type': 'ksponly',
     'mat_type': 'matfree',
@@ -204,8 +222,8 @@ solver_parameters_diag = {
     'ksp': {
         'monitor': None,
         'converged_reason': None,
-        'rtol': rtol,
-        'atol': atol,
+        'atol': paradiag_atol,
+        'rtol': paradiag_rtol,
         'stol': 1e-12,
     },
     'pc_type': 'python',
@@ -317,8 +335,8 @@ def advection(F, ubar, v, continuity=False, vector=False, upwind=True):
     return L
 
 u, D = TrialFunctions(W)
-uh = (u0+u)/2
-Dh = (D0+D)/2
+uh = (1-theta)*u0 + theta*u
+Dh = (1-theta)*D0 + theta*D
 
 dt_ss = dt_s
 # positive s outward propagation
@@ -334,8 +352,8 @@ if args.advection:
     
 u0, D0 = split(W0)    
     
-uh = (u+u1)/2
-Dh = (D+D1)/2
+uh = theta*u1 + (1-theta)*u
+Dh = theta*D1 + (1-theta)*D
 # positive s inward propagation
 F0p = (
     inner(v, u1 - u) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*Dh*div(v)
@@ -347,8 +365,8 @@ if args.advection:
     F0p += dt_ss*advection(Dh, ubar, phi, vector=False,
                            continuity=True, upwind=False)
 
-uh = (u0+u)/2
-Dh = (D0+D)/2
+uh = theta*u0 + (1-theta)*u
+Dh = theta*D0 + (1-theta)*D
 
 dt_ss = -dt_s
 # negative s outward  propagation
@@ -362,8 +380,8 @@ if args.advection:
     F1m += dt_ss*advection(Dh, ubar, phi, vector=False,
                            continuity=True, upwind=False)
 
-uh = (u+u1)/2
-Dh = (D+D1)/2
+uh = (1-theta)*u1 + theta*u
+Dh = (1-theta)*D1 + theta*D
 # negative s inward propagation
 F0m = (
     inner(v, u1 - u) + dt_ss*inner(f*perp(uh),v) - dt_ss*g*Dh*div(v)
@@ -376,7 +394,10 @@ if args.advection:
 
 
 if args.advection:
-    params = monoparameters_ns
+    if args.direct_s:
+        params = luparams
+    else:
+        params = monoparameters_ns
 else:
     params = hparams
 
@@ -437,15 +458,15 @@ def form_mass(uu, up, vu, vp):
 def form_mass_r(uu, up, vu, vp):
     return (inner(-uu, vu) + -up * vp) * dx
 
-theta = Constant(0.5)
+theta_dt = Constant(0.5)
 if paradiag_dt:
     ### === --- Set up the forward solver for dt propagation --- === ###
-    propagate_form = asQ.AllAtOnceForm(Wall, dt/nt, theta,
+    propagate_form = asQ.AllAtOnceForm(Wall, dt/nt, theta_dt,
                                        form_mass, get_form_function())
     propagate_solver = asQ.AllAtOnceSolver(propagate_form, Wall,
                                            solver_parameters=solver_parameters_diag_t,
                                            options_prefix="propagate_solver")
-    propagate_form_half = asQ.AllAtOnceForm(Wallh, dt/nt, theta,
+    propagate_form_half = asQ.AllAtOnceForm(Wallh, dt/nt, theta_dt,
                                             form_mass, get_form_function())
     propagate_solver_half = asQ.AllAtOnceSolver(propagate_form_half, Wallh,
                                                 solver_parameters=solver_parameters_diag_t_half,
@@ -456,14 +477,17 @@ if paradiag_fs:
                                form_mass, get_form_function(upwind=True))
     Wpsolver = asQ.AllAtOnceSolver(Wpform, Walls,
                                    solver_parameters=solver_parameters_diag)
-    Wmform = asQ.AllAtOnceForm(Walls, -alpha*dt/ns, theta,
+    Wmform = asQ.AllAtOnceForm(Walls, -alpha*dt/ns, 1-theta,
                                form_mass, get_form_function(upwind=False))
     Wmsolver = asQ.AllAtOnceSolver(Wmform, Walls,
                                    solver_parameters=solver_parameters_diag)
 
 # Set up the backward scatter
 if args.advection:
-    params = monoparameters_ns
+    if args.direct_s:
+        params = luparams
+    else:
+        params = monoparameters_ns
 else:
     params = hparams
 
@@ -561,7 +585,6 @@ w_k = Constant(1.0) # the weight
 u, D = TrialFunctions(W)
 nu, nD = split(N)
 
-theta = Constant(0.5)
 uh = (1-theta)*u + theta*u1 + (1-theta)*w_k*nu
 Dh = (1-theta)*D + theta*D1 + (1-theta)*w_k*nD
 
@@ -582,6 +605,9 @@ XProbp = LinearVariationalProblem(lhs(Fp), rhs(Fp), X0,
                                   constant_jacobian=constant_jacobian)
 Xpsolver_serial = LinearVariationalSolver(XProbp,
                                   solver_parameters = params)
+
+uh = theta*u + (1-theta)*u1 + theta*w_k*nu
+Dh = theta*D + (1-theta)*D1 + theta*w_k*nD
 
 dt_ss = -dt_s
 # negative s inward propagation
@@ -612,9 +638,12 @@ if paradiag_X:
     Ftp += (inner(v, w_k*nu)/dt_ss + phi*w_k*nD/dt_ss)*dx
     if args.advection:
         # we are going backwards in time
-        Ftp += advection(uh, ubar, v, upwind=True, vector=True)
+        Ftp += advection(uh, ubar, v, upwind=False, vector=True)
         Ftp += advection(Dh, ubar, phi, continuity=True,
-                              upwind=True, vector=False)
+                              upwind=False, vector=False)
+
+    uh = theta*w_k*nu
+    Dh = theta*w_k*nD
 
     dt_ss = -dt_s
     # negative s inward propagation
@@ -624,15 +653,14 @@ if paradiag_X:
     )*dx
     Ftm += (inner(v, w_k*nu)/dt_ss + phi*w_k*nD/dt_ss)*dx
     if args.advection:
-        Ftm += advection(uh, ubar, v, vector=True, upwind=False)
-        Ftm += advection(Dh, ubar, phi, continuity=True, vector=False, upwind=False)
+        Ftm += advection(uh, ubar, v, vector=True, upwind=True)
+        Ftm += advection(Dh, ubar, phi, continuity=True, vector=False, upwind=True)
 
 if paradiag_nf:
     w_k = Constant(1.0) # the weight
     u, D = TrialFunctions(W)
     nu, nD = split(N)
 
-    theta = Constant(0.5)
     uh = (1-theta)*u + theta*u1 + (1-theta)*w_k*nu
     Dh = (1-theta)*D + theta*D1 + (1-theta)*w_k*nD
 
@@ -654,6 +682,9 @@ if paradiag_nf:
     Xpsolver_nf = LinearVariationalSolver(XProbp,
                                           solver_parameters=params)
 
+    uh = theta*u + (1-theta)*u1 + theta*w_k*nu
+    Dh = theta*D + (1-theta)*D1 + theta*w_k*nD
+
     dt_ss = -dt_s
     # negative s inward propagation
     Fm = (
@@ -673,7 +704,7 @@ if paradiag_nf:
 
 
 if paradiag_X:
-    Xpform = asQ.AllAtOnceForm(Xall, -alpha*dt/ns, theta,
+    Xpform = asQ.AllAtOnceForm(Xall, -alpha*dt/ns, 1-theta,
                                form_mass, get_form_function(upwind=False))
     Xpsolver = asQ.AllAtOnceSolver(Xpform, Xall,
                                    solver_parameters=solver_parameters_diag)
@@ -763,6 +794,7 @@ Average = Function(W)
 
 N_forward_serial = [Function(W) for _ in range(ns)]
 W_backward_serial = [Function(W) for _ in range(ns)]
+W_forward_serial = [Function(W) for _ in range(ns)]
 
 def average(V, Average, t=None):
     get_dVdt(V, dVdt, positive=True, t=t)
@@ -798,6 +830,9 @@ def get_dVdt(V, dVdt, positive=True, t=None):
                     forwardp_expsolver.solve()
                 else:
                     forwardm_expsolver.solve()
+
+            if serial_one_backward_n:
+                W_forward_serial[step].assign(W1)
 
             if serial_forward_n:
                 # W1 is now W_{step+1}
@@ -912,6 +947,27 @@ def get_dVdt(V, dVdt, positive=True, t=None):
             if serial_forward_n:
                 # assign N
                 N.assign(N_forward_serial[step-1])
+            elif serial_one_backward_n:
+                if step == ns:
+                    # W_ns is unchanged
+                    W1.assign(W_forward_serial[ns-1])
+
+                else:
+                    # reconstruct W_step using exactly one backward step
+                    # starting from forward W_{step+1}
+                    W1.assign(W_forward_serial[step])
+
+                    with PETSc.Log.Event("one backward propagation ds"):
+                        if positive:
+                            backwardp_expsolver.solve()
+                        else:
+                            backwardm_expsolver.solve()
+
+                    W1.assign(W0)
+
+                with PETSc.Log.Event("nonlinearity"):
+                    NSolver.solve()
+
             else:
                 # compute N
                 with PETSc.Log.Event("nonlinearity"):
@@ -926,7 +982,7 @@ def get_dVdt(V, dVdt, positive=True, t=None):
                     Xmsolver_serial.solve()
             X1.assign(X0)
 
-            if not serial_forward_n:
+            if not serial_forward_n and not serial_one_backward_n:
                 # back propagate W
                 if step > 0:
                     with PETSc.Log.Event("backward propagation ds"):
