@@ -144,7 +144,7 @@ luparams = {
 
 monoparameters_ns = {
     #"snes_monitor": None,
-    "snes_lag_preconditioner": ns,
+    "snes_lag_preconditioner": -2,
     "snes_lag_preconditioner_persists": None,
     "mat_type": "matfree",
     "ksp_type": "gmres",
@@ -212,6 +212,7 @@ time_partition_t_half = [slice_length_t_half for _ in range(args.nslices)]
 time_partition_s = [slice_length_s for _ in range(args.nslices)]
 
 # setup parameters for paradiag solve (the number of windows is fixed to 1)
+block_parameters = luparams
 paradiag_atol = 1e-10
 paradiag_rtol = 1e-8
 solver_parameters_diag = {
@@ -230,6 +231,7 @@ solver_parameters_diag = {
     'pc_python_type': 'asQ.CirculantPC',
     'circulant_alpha': args.alphap,
     'circulant_state': 'linear',
+    'circulant_block': block_parameters,
     'aaos_jacobian_state': 'linear',
 }
 
@@ -296,6 +298,10 @@ Nall_new = asQ.AllAtOnceFunction(ensemble, time_partition_s, W)
 Xall = asQ.AllAtOnceFunction(ensemble, time_partition_s, W)
 RHS = asQ.AllAtOnceCofunction(ensemble, time_partition_s, W.dual())
 RHS_new = asQ.AllAtOnceCofunction(ensemble, time_partition_s, W.dual())
+
+#all at once functions for reducing memory
+Tall = asQ.AllAtOnceFunction(ensemble, time_partition_t, W)
+Sall = asQ.AllAtOnceFunction(ensemble, time_partition_s, W)
 
 #Set up the forward and backwards scatter discrete exponential operator
 W0 = Function(W)
@@ -461,26 +467,29 @@ def form_mass_r(uu, up, vu, vp):
 theta_dt = Constant(0.5)
 if paradiag_dt:
     ### === --- Set up the forward solver for dt propagation --- === ###
-    propagate_form = asQ.AllAtOnceForm(Wall, dt/nt, theta_dt,
-                                       form_mass, get_form_function())
-    propagate_solver = asQ.AllAtOnceSolver(propagate_form, Wall,
+    Tform = asQ.AllAtOnceForm(Tall, dt/nt, theta_dt, form_mass, get_form_function())
+    propagate_form = Tform
+    propagate_solver = asQ.AllAtOnceSolver(propagate_form, propagate_form.aaofunc,
                                            solver_parameters=solver_parameters_diag_t,
                                            options_prefix="propagate_solver")
-    propagate_form_half = asQ.AllAtOnceForm(Wallh, dt/nt, theta_dt,
-                                            form_mass, get_form_function())
+
+    propagate_form_half = asQ.AllAtOnceForm(Wallh, dt/nt, theta_dt, form_mass, get_form_function())
     propagate_solver_half = asQ.AllAtOnceSolver(propagate_form_half, Wallh,
                                                 solver_parameters=solver_parameters_diag_t_half,
                                                 options_prefix="propagate_solver_half")
 
 if paradiag_fs:
-    Wpform = asQ.AllAtOnceForm(Walls, alpha*dt/ns, theta,
-                               form_mass, get_form_function(upwind=True))
-    Wpsolver = asQ.AllAtOnceSolver(Wpform, Walls,
-                                   solver_parameters=solver_parameters_diag)
-    Wmform = asQ.AllAtOnceForm(Walls, -alpha*dt/ns, 1-theta,
-                               form_mass, get_form_function(upwind=False))
-    Wmsolver = asQ.AllAtOnceSolver(Wmform, Walls,
-                                   solver_parameters=solver_parameters_diag)
+    Sform_up = asQ.AllAtOnceForm(Sall, alpha*dt/ns, theta, form_mass, get_form_function(upwind=True))
+    Wpform = Sform_up
+    Wpsolver = asQ.AllAtOnceSolver(Wpform, Wpform.aaofunc,
+                                   solver_parameters=solver_parameters_diag,
+                                   options_prefix="Wpsolver")
+
+    Sform_down = asQ.AllAtOnceForm(Sall, -alpha*dt/ns, 1-theta, form_mass, get_form_function(upwind=False))
+    Wmform = Sform_down
+    Wmsolver = asQ.AllAtOnceSolver(Wmform, Wmform.aaofunc,
+                                   solver_parameters=solver_parameters_diag,
+                                   options_prefix="Wmsolver")
 
 # Set up the backward scatter
 if args.advection:
@@ -703,16 +712,6 @@ if paradiag_nf:
                                           solver_parameters=params)
 
 
-if paradiag_X:
-    Xpform = asQ.AllAtOnceForm(Xall, -alpha*dt/ns, 1-theta,
-                               form_mass, get_form_function(upwind=False))
-    Xpsolver = asQ.AllAtOnceSolver(Xpform, Xall,
-                                   solver_parameters=solver_parameters_diag)
-    Xmform = asQ.AllAtOnceForm(Xall, alpha*dt/ns, theta,
-                               form_mass, get_form_function(upwind=True))
-    Xmsolver = asQ.AllAtOnceSolver(Xmform, Xall,
-                                   solver_parameters=solver_parameters_diag)
-
 # total number of points is 2ns + 1, because we have s=0
 # after forward loop, W1 contains value at time ns*ds
 # if we start with X^{ns+1}=0, then according to above
@@ -817,9 +816,13 @@ def get_dVdt(V, dVdt, positive=True, t=None):
         Walls.assign(V)
         with PETSc.Log.Event("forward propagation ds"):
             if positive:
+                Wpsolver.aaofunc.assign(Walls)
                 Wpsolver.solve()
+                Walls.assign(Wpsolver.aaofunc)
             else:
+                Wmsolver.aaofunc.assign(Walls)
                 Wmsolver.solve()
+                Walls.assign(Wmsolver.aaofunc)
         Walls.bcast_field(-1, W1)
     else:
         W0.assign(V)
@@ -898,9 +901,13 @@ def get_dVdt(V, dVdt, positive=True, t=None):
         data_flip(RHS, RHS_new)
         # solve allatoncesolver with RHS in the option
         if positive:
-            Xpsolver.solve(rhs=RHS_new)
+            Wmsolver.aaofunc.assign(Xall)
+            Wmsolver.solve(rhs=RHS_new)
+            Xall.assign(Wmsolver.aaofunc)
         else:
-            Xmsolver.solve(rhs=RHS_new)
+            Wpsolver.aaofunc.assign(Xall)
+            Wpsolver.solve(rhs=RHS_new)
+            Xall.assign(Wpsolver.aaofunc)
         Xall.bcast_field(-1, dVdt)
 
     elif paradiag_n:
@@ -1004,7 +1011,9 @@ def propagate(V_in, V_out, t=None, half=False):
             Wallh.bcast_field(-1, V_out)
         else:
             Wall.assign(V_in)
+            propagate_solver.aaofunc.assign(Wall)
             propagate_solver.solve()
+            Wall.assign(propagate_solver.aaofunc)
             Wall.bcast_field(-1, V_out)
     else:
         W0.assign(V_in)
