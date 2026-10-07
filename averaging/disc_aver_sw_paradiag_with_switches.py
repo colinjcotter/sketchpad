@@ -39,8 +39,7 @@ parser.add_argument('--paradiag_n', action="store_true", help='Use paradiag for 
 parser.add_argument('--paradiag_backward_n', action="store_true", help='Use paradiag for nonlinear operator using W from backward propagation')
 parser.add_argument('--paradiag_nf', action="store_true", help='Use paradiag for nonlinear operator and forward in serial by flipping')
 parser.add_argument('--paradiag_X', action="store_true", help='Use paradiag for backward gather')
-parser.add_argument('--serial_forward_n', action="store_true", help='Use W from forward propagation for backward gather')
-parser.add_argument('--serial_one_backward_n', action="store_true", help='Evaluate N using one backward step from the next forward state')
+parser.add_argument('--paradiag_X_halo', action='store_true', help='Use ParaDiag backward gather with backward-W halo-local RHS')
 parser.add_argument('--constant_jacobian', action="store_true", help='Use constant_jacobian option for faster calculation')
 parser.add_argument('--ksp_atol_s', type=float, default=1e-8, help='ksp_atol for serial ns solves')
 parser.add_argument('--ksp_rtol_s', type=float, default=1e-8, help='ksp_rtol for serial ns solves')
@@ -60,23 +59,19 @@ paradiag_n = args.paradiag_n
 paradiag_backward_n = args.paradiag_backward_n
 paradiag_nf = args.paradiag_nf
 paradiag_X = args.paradiag_X
-serial_forward_n = args.serial_forward_n
-serial_one_backward_n = args.serial_one_backward_n
+paradiag_X_halo = args.paradiag_X_halo
 
-if serial_one_backward_n:
-    assert not paradiag_fs
-    assert not paradiag_n
-    assert not paradiag_backward_n
-    assert not paradiag_nf
-    assert not paradiag_X
+if paradiag_backward_n:
+    assert paradiag_X, \
+        "--paradiag_backward_n requires --paradiag_X"
 
-assert not (serial_forward_n and serial_one_backward_n)
+assert not (paradiag_X and paradiag_X_halo), \
+    "--paradiag_X and --paradiag_X_halo are mutually exclusive"
 
 print(args)
 
 if args.show_args:
     PETSc.Sys.Print(args)
-
 
 PETSc.Sys.Print('')
 PETSc.Sys.Print('### === --- Setting up --- === ###')
@@ -298,6 +293,7 @@ Nall_new = asQ.AllAtOnceFunction(ensemble, time_partition_s, W)
 Xall = asQ.AllAtOnceFunction(ensemble, time_partition_s, W)
 RHS = asQ.AllAtOnceCofunction(ensemble, time_partition_s, W.dual())
 RHS_new = asQ.AllAtOnceCofunction(ensemble, time_partition_s, W.dual())
+RHS_halo = asQ.AllAtOnceCofunction(ensemble, time_partition_s, W.dual())
 
 #all at once functions for reducing memory
 Tall = asQ.AllAtOnceFunction(ensemble, time_partition_t, W)
@@ -478,7 +474,7 @@ if paradiag_dt:
                                                 solver_parameters=solver_parameters_diag_t_half,
                                                 options_prefix="propagate_solver_half")
 
-if paradiag_fs:
+if paradiag_fs or paradiag_X or paradiag_X_halo:
     Sform_up = asQ.AllAtOnceForm(Sall, alpha*dt/ns, theta, form_mass, get_form_function(upwind=True))
     Wpform = Sform_up
     Wpsolver = asQ.AllAtOnceSolver(Wpform, Wpform.aaofunc,
@@ -634,7 +630,7 @@ XProbm = LinearVariationalProblem(lhs(Fm), rhs(Fm), X0,
 Xmsolver_serial = LinearVariationalSolver(XProbm,
                                   solver_parameters = params)
 
-if paradiag_X:
+if paradiag_X or paradiag_X_halo:
     uh = (1-theta)*w_k*nu
     Dh = (1-theta)*w_k*nD
 
@@ -791,9 +787,8 @@ V = Function(W)
 dVdt = Function(W)
 Average = Function(W)
 
-N_forward_serial = [Function(W) for _ in range(ns)]
-W_backward_serial = [Function(W) for _ in range(ns)]
-W_forward_serial = [Function(W) for _ in range(ns)]
+if paradiag_backward_n:
+    W_backward_serial = [Function(W) for _ in range(ns)]
 
 def average(V, Average, t=None):
     get_dVdt(V, dVdt, positive=True, t=t)
@@ -833,19 +828,6 @@ def get_dVdt(V, dVdt, positive=True, t=None):
                     forwardp_expsolver.solve()
                 else:
                     forwardm_expsolver.solve()
-
-            if serial_one_backward_n:
-                W_forward_serial[step].assign(W1)
-
-            if serial_forward_n:
-                # W1 is now W_{step+1}
-                NSolver.solve()
-
-                # index 0 = N(W_1)
-                # ...
-                # index ns-1 = N(W_ns)
-                N_forward_serial[step].assign(N)
-
             W0.assign(W1)
 
     if paradiag_backward_n:
@@ -884,22 +866,91 @@ def get_dVdt(V, dVdt, positive=True, t=None):
             Nall[step].assign(N)
 
     # backwards gather
-    if paradiag_X:
+    # ================================================================
+    # NEW halo-local ParaDiag X path
+    # ================================================================
+    if paradiag_X_halo:
+
+        # Build parallel backward W trajectory
+        if positive:
+            Wmsolver.aaofunc.zero()
+            Wmsolver.aaofunc.initial_condition.assign(W1)
+            Wmsolver.solve()
+            Wback = Wmsolver.aaofunc
+        else:
+            Wpsolver.aaofunc.zero()
+            Wpsolver.aaofunc.initial_condition.assign(W1)
+            Wpsolver.solve()
+            Wback = Wpsolver.aaofunc
+
+        # Exchange only slice-boundary backward-W field
+        Wback.update_time_halos()
+
+        # Build RHS directly in backward ordering
+        for ilocal in range(time_partition_s[ensemble_rank]):
+
+            jglobal = Wback.transform_index(
+                ilocal,
+                from_range='slice',
+                to_range='window'
+            )
+
+            physical_step = ns - jglobal
+
+            if jglobal == 0:
+                W1.assign(Wback.initial_condition)
+
+            elif ilocal == 0:
+                W1.assign(Wback.uprev)
+
+            else:
+                W1.assign(Wback[ilocal-1])
+
+            NSolver.solve()
+
+            w_k.assign(weights[physical_step])
+
+            if positive:
+                assemble(-Ftp, tensor=RHS_halo[ilocal])
+            else:
+                assemble(-Ftm, tensor=RHS_halo[ilocal])
+
+        # Gather X with ParaDiag
+        if positive:
+            Wmsolver.aaofunc.zero()
+            Wmsolver.solve(rhs=RHS_halo)
+            Wmsolver.aaofunc.bcast_field(-1, dVdt)
+        else:
+            Wpsolver.aaofunc.zero()
+            Wpsolver.solve(rhs=RHS_halo)
+            Wpsolver.aaofunc.bcast_field(-1, dVdt)
+
+    # ================================================================
+    # OLD paradiag_X path -- leave unchanged
+    # ================================================================
+    elif paradiag_X:
+
         for step in range(time_partition_s[ensemble_rank]):
-            # compute RHS
+
             N.assign(Nall[step])
-            step_W = Nall.transform_index(step, from_range='slice', to_range='window')
-            w_k.assign(weights[step_W+1])
+
+            step_W = Nall.transform_index(
+                step,
+                from_range='slice',
+                to_range='window'
+            )
+
+            w_k.assign(weights[step_W + 1])
+
             if positive:
                 assemble(-Ftp, tensor=RHS[step])
             else:
                 assemble(-Ftm, tensor=RHS[step])
 
-        # solve backward process using paradiag
-        Xall.zero()
-        # flip the data in RHS
         data_flip(RHS, RHS_new)
-        # solve allatoncesolver with RHS in the option
+
+        Xall.zero()
+
         if positive:
             Wmsolver.aaofunc.assign(Xall)
             Wmsolver.solve(rhs=RHS_new)
@@ -908,6 +959,7 @@ def get_dVdt(V, dVdt, positive=True, t=None):
             Wpsolver.aaofunc.assign(Xall)
             Wpsolver.solve(rhs=RHS_new)
             Xall.assign(Wpsolver.aaofunc)
+
         Xall.bcast_field(-1, dVdt)
 
     elif paradiag_n:
@@ -949,58 +1001,37 @@ def get_dVdt(V, dVdt, positive=True, t=None):
     else:
         # solve backward process in serial without paradiag
         X1.assign(0.)
+
         for step in ProgressBar(f'average backward').iter(range(ns, 0, -1)):
 
-            if serial_forward_n:
-                # assign N
-                N.assign(N_forward_serial[step-1])
-            elif serial_one_backward_n:
-                if step == ns:
-                    # W_ns is unchanged
-                    W1.assign(W_forward_serial[ns-1])
-
-                else:
-                    # reconstruct W_step using exactly one backward step
-                    # starting from forward W_{step+1}
-                    W1.assign(W_forward_serial[step])
-
-                    with PETSc.Log.Event("one backward propagation ds"):
-                        if positive:
-                            backwardp_expsolver.solve()
-                        else:
-                            backwardm_expsolver.solve()
-
-                    W1.assign(W0)
-
-                with PETSc.Log.Event("nonlinearity"):
-                    NSolver.solve()
-
-            else:
-                # compute N
-                with PETSc.Log.Event("nonlinearity"):
-                    NSolver.solve()
+            # compute N
+            with PETSc.Log.Event("nonlinearity"):
+                NSolver.solve()
 
             # propagate X back
             with PETSc.Log.Event("backward integration"):
                 w_k.assign(weights[step])
+
                 if positive:
                     Xpsolver_serial.solve()
                 else:
                     Xmsolver_serial.solve()
+
             X1.assign(X0)
 
-            if not serial_forward_n and not serial_one_backward_n:
-                # back propagate W
-                if step > 0:
-                    with PETSc.Log.Event("backward propagation ds"):
-                        if positive:
-                            backwardp_expsolver.solve()
-                        else:
-                            backwardm_expsolver.solve()
-                    W1.assign(W0)
+            # back propagate W
+            if step > 0:
+                with PETSc.Log.Event("backward propagation ds"):
+                    if positive:
+                        backwardp_expsolver.solve()
+                    else:
+                        backwardm_expsolver.solve()
+
+                W1.assign(W0)
 
         # copy contents
         dVdt.assign(X0)
+
 
 # Function to apply forward propagation in t
 def propagate(V_in, V_out, t=None, half=False):
