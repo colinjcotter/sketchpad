@@ -40,6 +40,7 @@ parser.add_argument('--paradiag_backward_n', action="store_true", help='Use para
 parser.add_argument('--paradiag_nf', action="store_true", help='Use paradiag for nonlinear operator and forward in serial by flipping')
 parser.add_argument('--paradiag_X', action="store_true", help='Use paradiag for backward gather')
 parser.add_argument('--paradiag_X_halo', action='store_true', help='Use ParaDiag backward gather with backward-W halo-local RHS')
+parser.add_argument('--paradiag_X_shift', action='store_true', help='Use shifted ParaDiag X gather including X_0')
 parser.add_argument('--constant_jacobian', action="store_true", help='Use constant_jacobian option for faster calculation')
 parser.add_argument('--ksp_atol_s', type=float, default=1e-8, help='ksp_atol for serial ns solves')
 parser.add_argument('--ksp_rtol_s', type=float, default=1e-8, help='ksp_rtol for serial ns solves')
@@ -60,13 +61,18 @@ paradiag_backward_n = args.paradiag_backward_n
 paradiag_nf = args.paradiag_nf
 paradiag_X = args.paradiag_X
 paradiag_X_halo = args.paradiag_X_halo
+paradiag_X_shift = args.paradiag_X_shift
 
 if paradiag_backward_n:
     assert paradiag_X, \
         "--paradiag_backward_n requires --paradiag_X"
 
-assert not (paradiag_X and paradiag_X_halo), \
-    "--paradiag_X and --paradiag_X_halo are mutually exclusive"
+assert sum([
+    paradiag_X,
+    paradiag_X_halo,
+    paradiag_X_shift
+]) <= 1, \
+    "--paradiag_X, --paradiag_X_halo and --paradiag_X_shift are mutually exclusive"
 
 print(args)
 
@@ -233,14 +239,6 @@ solver_parameters_diag = {
 solver_parameters_diag_t = solver_parameters_diag
 solver_parameters_diag_t_half = solver_parameters_diag
 solver_parameters_diag_s = solver_parameters_diag
-
-# if args.advection:
-#     block_parameters = monoparameters_ns
-# else:
-#     block_parameters = hparams
-
-# for i in range(sum(time_partition_t)):
-#     solver_parameters_diag['circulant_block_'+str(i)+'_'] = block_parameters
 
 # setup ensemble
 ensemble = asQ.create_ensemble(time_partition_t)
@@ -457,8 +455,6 @@ def get_form_function(upwind=True):
 def form_mass(uu, up, vu, vp):
     return (inner(uu, vu) + up * vp) * dx
 
-def form_mass_r(uu, up, vu, vp):
-    return (inner(-uu, vu) + -up * vp) * dx
 
 theta_dt = Constant(0.5)
 if paradiag_dt:
@@ -474,7 +470,7 @@ if paradiag_dt:
                                                 solver_parameters=solver_parameters_diag_t_half,
                                                 options_prefix="propagate_solver_half")
 
-if paradiag_fs or paradiag_X or paradiag_X_halo:
+if paradiag_fs or paradiag_X or paradiag_X_halo or paradiag_X_shift:
     Sform_up = asQ.AllAtOnceForm(Sall, alpha*dt/ns, theta, form_mass, get_form_function(upwind=True))
     Wpform = Sform_up
     Wpsolver = asQ.AllAtOnceSolver(Wpform, Wpform.aaofunc,
@@ -581,8 +577,8 @@ u1, D1 = split(X1)
 # X^k = sum_{m=k}^M w_m (exph(-L ds))^(m-k) N(W_m)
 # X^{M+1} = 0
 # X^{k-1} = exph(-L ds)X^k + w_{k-1}*N(W_{k-1})
-# (1 - ds/2*L)X^k + w_k*(1 + ds/2*L)N(W_{k-1}) = (1 + ds/2*L)X^{k-1}
-# X^k - X^{k-1] - ds*L(X^{k-1/2} + ds/2*w_k N(W_{k-1})) + w_k N(W_{k-1}) = 0
+# (1 - ds/2*L)X^k + w_{k-1}*(1 + ds/2*L)N(W_{k-1}) = (1 + ds/2*L)X^{k-1}
+# X^k - X^{k-1} - ds*L(X^{k-1/2} + ds/2*w_k N(W_{k-1})) + w_k N(W_{k-1}) = 0
 
 # we propagate W back, compute N, use to propagate X back
 
@@ -630,7 +626,7 @@ XProbm = LinearVariationalProblem(lhs(Fm), rhs(Fm), X0,
 Xmsolver_serial = LinearVariationalSolver(XProbm,
                                   solver_parameters = params)
 
-if paradiag_X or paradiag_X_halo:
+if paradiag_X or paradiag_X_halo or paradiag_X_shift:
     uh = (1-theta)*w_k*nu
     Dh = (1-theta)*w_k*nD
 
@@ -712,7 +708,7 @@ if paradiag_nf:
 # after forward loop, W1 contains value at time ns*ds
 # if we start with X^{ns+1}=0, then according to above
 # (1 + ds/2*L)X^{ns} = w_k(1+ds/2*L)N(W_{ns})
-# which is equivalent to X^{ns} = N(W_{ns})
+# which is equivalent to X^{ns} = w_ns * N(W_ns)
 # so everything is working
 # we just need to change the order to
 # compute N, use to propagate X back, propagate W back
@@ -786,22 +782,29 @@ for ilocal in range(time_partition_s[ensemble_rank]):
 V = Function(W)
 dVdt = Function(W)
 Average = Function(W)
+X_initial = Function(W)
 
 if paradiag_backward_n:
     W_backward_serial = [Function(W) for _ in range(ns)]
 
 def average(V, Average, t=None):
-    get_dVdt(V, dVdt, positive=True, t=t)
-    W1.assign(dVdt)
-    backwardp_expsolver.solve()
-    Average.assign(dt*W0)
-    get_dVdt(V, dVdt, positive=False, t=t)
-    W1.assign(dVdt)
-    backwardm_expsolver.solve()
-    Average.assign(Average+dt*W0)
-    W1.assign(V)
-    NSolver.solve()
-    Average.assign(Average+dt*Constant(weights[0])*N)
+    if paradiag_X_shift:
+        get_dVdt(V, dVdt, positive=True, t=t)
+        Average.assign(dt*dVdt)
+        get_dVdt(V, dVdt, positive=False, t=t)
+        Average.assign(Average + dt*dVdt)
+    else:
+        get_dVdt(V, dVdt, positive=True, t=t)
+        W1.assign(dVdt)
+        backwardp_expsolver.solve()
+        Average.assign(dt*W0)
+        get_dVdt(V, dVdt, positive=False, t=t)
+        W1.assign(dVdt)
+        backwardm_expsolver.solve()
+        Average.assign(Average+dt*W0)
+        W1.assign(V)
+        NSolver.solve()
+        Average.assign(Average+dt*Constant(weights[0])*N)
 
 
 # Function to take in current state V and return dV/dt
@@ -867,7 +870,7 @@ def get_dVdt(V, dVdt, positive=True, t=None):
 
     # backwards gather
     # ================================================================
-    # NEW halo-local ParaDiag X path
+    # halo ParaDiag X path
     # ================================================================
     if paradiag_X_halo:
 
@@ -926,7 +929,112 @@ def get_dVdt(V, dVdt, positive=True, t=None):
             Wpsolver.aaofunc.bcast_field(-1, dVdt)
 
     # ================================================================
-    # OLD paradiag_X path -- leave unchanged
+    # shifted ParaDiag X path
+    # ================================================================
+    elif paradiag_X_shift:
+
+        # ================================================================
+        # Build parallel backward W trajectory
+        #
+        # initial_condition = W_ns
+        # Wback[0]          = W_(ns-1)
+        # ...
+        # Wback[ns-2]       = W_1
+        # Wback[ns-1]       = reconstructed W_0
+        # ================================================================
+
+        if positive:
+            Wmsolver.aaofunc.zero()
+            Wmsolver.aaofunc.initial_condition.assign(W1)
+            Wmsolver.solve()
+            Wback = Wmsolver.aaofunc
+
+        else:
+            Wpsolver.aaofunc.zero()
+            Wpsolver.aaofunc.initial_condition.assign(W1)
+            Wpsolver.solve()
+            Wback = Wpsolver.aaofunc
+
+        # ================================================================
+        # Shift the X trajectory by one index.
+        #
+        # paradiag_X_halo path:
+        #
+        #     initial_condition = X_(ns+1) = 0
+        #     aaofunc[0]        = X_ns
+        #     ...
+        #     aaofunc[-1]       = X_1
+        #
+        # paradiag_X_shift path (current path):
+        #
+        #     initial_condition = X_ns
+        #     aaofunc[0]        = X_(ns-1)
+        #     ...
+        #     aaofunc[-1]       = X_0
+        #
+        # ================================================================
+
+        # First construct X_ns = weights[ns] * N(W_ns)
+
+        W1.assign(Wback.initial_condition)
+        NSolver.solve()
+        X_initial.assign(float(weights[ns]) * N)
+
+        # Build shifted RHS for W_(ns-1), ..., W_1.
+        # Final step X_1 -> X_0 uses only the linear backward propagation
+        # with no nonlinear source term, ie, the centre contribution
+        # 0.5*w_0*N(V) is not included in the ParaDiag RHS.
+
+        for ilocal in range(time_partition_s[ensemble_rank]):
+
+            jglobal = Wback.transform_index(
+                ilocal,
+                from_range='slice',
+                to_range='window'
+            )
+
+            physical_step = ns - 1 - jglobal
+            if physical_step == 0:
+                # The centre contribution is added after the ParaDiag solve.
+                w_k.assign(0.0)
+            else:
+                W1.assign(Wback[ilocal])
+                NSolver.solve()
+                w_k.assign(weights[physical_step])
+
+            if positive:
+                assemble(-Ftp, tensor=RHS_halo[ilocal])
+            else:
+                assemble(-Ftm, tensor=RHS_halo[ilocal])
+
+        # Gather X with ParaDiag, the last field is now X_0.
+        # aaofunc[0] = X_(ns-1)
+        # aaofunc[-1] = X_0
+
+        if positive:
+            Wmsolver.aaofunc.zero()
+            Wmsolver.aaofunc.initial_condition.assign(X_initial)
+            Wmsolver.solve(rhs=RHS_halo)
+            Wmsolver.aaofunc.bcast_field(-1, dVdt)
+        else:
+            Wpsolver.aaofunc.zero()
+            Wpsolver.aaofunc.initial_condition.assign(X_initial)
+            Wpsolver.solve(rhs=RHS_halo)
+            Wpsolver.aaofunc.bcast_field(-1, dVdt)
+
+        # Add half of the centre contribution.
+        # Each positive/negative branch gets half, so together they give
+        # weights[0] * N(V).
+
+        W1.assign(V)
+        NSolver.solve()
+        dVdt.assign(
+            dVdt
+            + Constant(0.5 * float(weights[0])) * N
+        )
+
+    # ================================================================
+    # OLD paradiag_X path
     # ================================================================
     elif paradiag_X:
 
