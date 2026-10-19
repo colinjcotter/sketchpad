@@ -198,14 +198,21 @@ solver_parameters_diag_t = solver_parameters_diag
 solver_parameters_diag_t_half = solver_parameters_diag
 solver_parameters_diag_s = solver_parameters_diag
 
-if args.advection:
-    block_parameters = monoparameters_ns
-else:
-    block_parameters = hybridscpc_parameters
+# if args.advection:
+#     block_parameters = monoparameters_ns
+# else:
+#     block_parameters = hybridscpc_parameters
 
-solver_parameters_diag_t['circulant_block'] = block_parameters
-solver_parameters_diag_t_half['circulant_block'] = block_parameters
-solver_parameters_diag_s['circulant_block'] = block_parameters
+# block_parameters = {
+#     'ksp_type': "gmres",
+#     'ksp_converged_reason': None,
+#     'snes_view': None,
+#     'ksp_view': None
+# }
+
+# solver_parameters_diag_t['circulant_block'] = block_parameters
+# solver_parameters_diag_t_half['circulant_block'] = block_parameters
+# solver_parameters_diag_s['circulant_block'] = block_parameters
 
 # set constant_jacobian
 if args.dynamic_ubar:
