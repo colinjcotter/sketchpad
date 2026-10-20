@@ -724,7 +724,8 @@ weights = np.exp(-1.0/svals/(1.0-svals))
 weights[0] /= 2
 # renormalise and then half because once for each sign
 weights = weights/np.sum(weights)/2
-weights[0] *= 2
+# double the 0 point again
+#weights[0] *= 2
 
 print(weights)
 weights_r = []
@@ -804,7 +805,7 @@ def average(V, Average, t=None):
         Average.assign(Average+dt*W0)
         W1.assign(V)
         NSolver.solve()
-        Average.assign(Average+dt*Constant(weights[0])*N)
+        Average.assign(Average+dt*2*Constant(weights[0])*N)
 
 
 # Function to take in current state V and return dV/dt
@@ -975,15 +976,14 @@ def get_dVdt(V, dVdt, positive=True, t=None):
         # ================================================================
 
         # First construct X_ns = weights[ns] * N(W_ns)
+        # This is redundant across all processors. 
 
         W1.assign(Wback.initial_condition)
         NSolver.solve()
         X_initial.assign(float(weights[ns]) * N)
 
         # Build shifted RHS for W_(ns-1), ..., W_1.
-        # Final step X_1 -> X_0 uses only the linear backward propagation
-        # with no nonlinear source term, ie, the centre contribution
-        # 0.5*w_0*N(V) is not included in the ParaDiag RHS.
+        # Centre weights are halved in advance.
 
         for ilocal in range(time_partition_s[ensemble_rank]):
 
@@ -992,20 +992,16 @@ def get_dVdt(V, dVdt, positive=True, t=None):
                 from_range='slice',
                 to_range='window'
             )
-
             physical_step = ns - 1 - jglobal
-            if physical_step == 0:
-                # The centre contribution is added after the ParaDiag solve.
-                w_k.assign(0.0)
-            else:
-                W1.assign(Wback[ilocal])
-                NSolver.solve()
-                w_k.assign(weights[physical_step])
+
+            W1.assign(Wback[ilocal])
+            w_k.assign(weights[physical_step])
+            NSolver.solve()
 
             if positive:
-                assemble(-Ftp, tensor=RHS_halo[ilocal])
+                assemble(-Ftp, tensor=RHS[ilocal])
             else:
-                assemble(-Ftm, tensor=RHS_halo[ilocal])
+                assemble(-Ftm, tensor=RHS[ilocal])
 
         # Gather X with ParaDiag, the last field is now X_0.
         # aaofunc[0] = X_(ns-1)
@@ -1014,24 +1010,13 @@ def get_dVdt(V, dVdt, positive=True, t=None):
         if positive:
             Wmsolver.aaofunc.zero()
             Wmsolver.aaofunc.initial_condition.assign(X_initial)
-            Wmsolver.solve(rhs=RHS_halo)
+            Wmsolver.solve(rhs=RHS)
             Wmsolver.aaofunc.bcast_field(-1, dVdt)
         else:
             Wpsolver.aaofunc.zero()
             Wpsolver.aaofunc.initial_condition.assign(X_initial)
-            Wpsolver.solve(rhs=RHS_halo)
+            Wpsolver.solve(rhs=RHS)
             Wpsolver.aaofunc.bcast_field(-1, dVdt)
-
-        # Add half of the centre contribution.
-        # Each positive/negative branch gets half, so together they give
-        # weights[0] * N(V).
-
-        W1.assign(V)
-        NSolver.solve()
-        dVdt.assign(
-            dVdt
-            + Constant(0.5 * float(weights[0])) * N
-        )
 
     # ================================================================
     # OLD paradiag_X path
