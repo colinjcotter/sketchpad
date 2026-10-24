@@ -12,22 +12,30 @@ V = FunctionSpace(mesh, "CG", 1)
 W = V * V * V
 
 w0 = Function(W)
-mhat0, dHdmhat0, u0 = w0.subfunctions
+mhat0, _, _ = w0.subfunctions
 
 x, = SpatialCoordinate(mesh)
+u0 = Function(V).interpolate(0.1*(exp(-(x-10.0)**2/2)
+                                  -exp(-(x-30.0)**2/2)))
 uplot = Function(V)
+
+#solver to get m0
 m0 = Function(V)
 p = TestFunction(V)
 m = TrialFunction(V)
-
-m0.interpolate(0.2*2/(exp(x-403./15.) + exp(-x+403./15.))
-                  + 0.5*2/(exp(x-203./15.)+exp(-x+203./15.)))
+am = inner(m,p)*dx
+Lm = (inner(u0,p)
+      + alphasq*inner(u0.dx(0),p.dx(0))
+      )*dx
+solve(am == Lm, m0)
+mhat0.interpolate(sqrt(m0))
 
 # solver to plot u
 u = TrialFunction(V)
-am = (p*u + alphasq*p.dx(0)*u.dx(0))*dx
-Lm = p*mhat0**2*dx
-
+am = (inner(u,p)
+      + alphasq*inner(u.dx(0),p.dx(0))
+      )*dx
+Lm = inner(mhat0**2,p)*dx
 uplot = Function(V)
 uprob = LinearVariationalProblem(am, Lm, uplot)
 usolver = LinearVariationalSolver(uprob)
@@ -42,9 +50,10 @@ dHdmhat0 = Dt(IdHdmhat0)
 u0 = Dt(Iu0)
 
 F = (
-   (r*u0 + alphasq*r.dx(0)*u0.dx(0) - r*mhat0**2)*dx +
-   q*(dHdmhat0 - mhat0*u0)*dx 
-   + (p*Dt(mhat0) + 0.5*(p*dHdmhat0.dx(0) - p.dx(0)*dHdmhat0))*dx
+   (inner(u0,r) + alphasq*inner(u0.dx(0),r.dx(0)) - inner(mhat0**2,r))*dx +
+   inner(dHdmhat0 - mhat0*u0,q)*dx 
+   + (inner(Dt(mhat0),p) + 0.5*(inner(dHdmhat0.dx(0),p)
+                                - inner(dHdmhat0,p.dx(0))))*dx
 )
 
 t = 0.0
@@ -63,12 +72,9 @@ T = 1000.0
 ufile = VTKFile('sqrtch.pvd')
 usolver.solve()
 ufile.write(uplot, time=t)
-all_us = []
 
 ndump = 50
 dumpn = 0
-
-#FOR VISUALISATION WILL NEED TO SOLVE FOR u0!
 
 energy = []
 
@@ -76,7 +82,7 @@ while (t < T - 0.5*dt):
    t += dt
    usolver.solve()
    u = uplot
-   E = assemble((u*u + alphasq*u.dx(0)*u.dx(0))*dx)
+   E = assemble((inner(u,u) + alphasq*inner(u.dx(0),u.dx(0)))*dx)
    energy.append(E)
    print("t = ", t, "E = ", E)
    stepper.advance()
