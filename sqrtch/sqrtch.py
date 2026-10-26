@@ -60,7 +60,7 @@ t = 0.0
 tc = Constant(t)
 dtc = Constant(dt)
 
-butcher_tableau = GaussLegendre(1)
+butcher_tableau = GaussLegendre(3)
 luparams = {"mat_type": "aij",
             "ksp_type": "preonly",
             "pc_type": "lu"}

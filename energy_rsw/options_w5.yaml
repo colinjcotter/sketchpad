@@ -1,0 +1,93 @@
+---
+$$patch: &patch
+  pc:
+    type: python
+    python_type: firedrake.PatchPC
+  patch:
+    pc_patch:
+      save_operators: true
+      partition_of_unity: true
+      sub_mat_type: seqdense
+      construct_dim: 0
+      construct_type: star
+      local_type: additive
+      precompute_element_tensors: true
+      symmetrise_sweep: false
+  patch_sub:
+    ksp_type: preonly
+    pc_type: lu
+    pc_factor_shift_type: nonzero
+    pc_factor_mat_ordering_type: rcm
+    pc_factor_reuse_ordering:
+
+$$mmg: &mmg
+  pc:
+    use_amat: false
+    type: mg
+    mg:
+      cycle_type: v
+      type: multiplicative
+  mg:
+    coarse:
+      ksp:
+        type: preonly
+      pc:
+        type: python
+        python_type: firedrake.AssembledPC
+      assembled:
+        pc:
+          type: lu
+          precision: single
+          factor_mat_solver_type: mumps
+    levels:
+      ksp:
+        type: gmres
+        max_it: 3
+      <<: *patch
+
+dt: 3600
+tmax: 4320000
+stepper:
+  components: 3
+  mat_type: matfree
+  set_atol:
+  pc:
+    type: fieldsplit
+    fieldsplit:
+      type: multiplicative
+      0_fields: 0,1,2
+      1_fields: 3,4,5
+      2_fields: 6,7,8
+  fieldsplit:
+    ksp:
+      type: preonly
+    <<: *mmg
+  scheme:
+    type: cpg
+  schemeJp: rana
+  time:
+    order: 3
+    quadrature:
+      degree: 5
+  snes:
+    ksp_ew: 
+    atol: 0.
+    stol: 0.
+    rtol: 1.0e-10
+    monitor: ascii:w5_snes.txt
+  ksp:
+    atol: 1.0
+    type: fgmres
+    rtol: 1.0e-10
+    view: ascii:w5_ksp_view.txt
+    monitor: ascii:w5_ksp.txt
+testcase: w5
+mesh:
+  nrefs: 6
+  baserefs: 2
+  degree: 2
+quadrature:
+  degree: 6
+filename: longw5
+vtkfreq: 24
+log_view: ascii:w5_log.txt:ascii_flamegraph
