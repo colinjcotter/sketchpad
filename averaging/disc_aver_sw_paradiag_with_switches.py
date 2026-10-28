@@ -1,6 +1,5 @@
 from firedrake import *
 from firedrake.petsc import PETSc
-from firedrake.__future__ import interpolate
 from pyop2.mpi import MPI
 import asQ
 
@@ -24,13 +23,11 @@ parser.add_argument('--advection', action="store_true", help='include mean flow 
 parser.add_argument('--dynamic_ubar', action="store_true", help='Use un as ubar.')
 parser.add_argument('--vector_invariant', action="store_true", help='use vector invariant form.')
 parser.add_argument('--eta', action="store_true", help='use eta instead of D.')
-parser.add_argument('--show_args', action='store_true', help='Output all the arguments.')
 parser.add_argument('--linear', action='store_true', help='Just solve the linearpropagator at each step (as if N=0).')
 parser.add_argument('--linear_velocity', action='store_true', help='Drop the velocity advection from N.')
 parser.add_argument('--linear_height', action='store_true', help='Drop the height advection from N.')
 parser.add_argument('--timestepping', type=str, default='rk4', choices=['rk4', 'heuns'], help='Choose a time steeping method. Default heuns.')
 parser.add_argument('--pickup', action='store_true', help='Pickup the result from the checkpoint.')
-parser.add_argument('--pickup_from', type=str, default='w2')
 parser.add_argument('--nslices', type=int, default=2, help='Number of time-slices per time-window.')
 parser.add_argument('--alphap', type=float, default=0.0001, help='Circulant coefficient.')
 parser.add_argument('--paradiag_dt', action="store_true", help='Use paradiag for propagate solve')
@@ -76,12 +73,8 @@ assert sum([
 
 print(args)
 
-if args.show_args:
-    PETSc.Sys.Print(args)
-
-PETSc.Sys.Print('')
-PETSc.Sys.Print('### === --- Setting up --- === ###')
-PETSc.Sys.Print('')
+print('')
+print('### === --- Setting up --- === ###')
 
 # set arguments
 ref_level = args.ref_level
@@ -93,6 +86,7 @@ dt_s = Constant(dts)
 ns = args.ns
 nt = args.nt
 theta = Constant(args.theta)
+name = args.filename
 
 if nt % 2 == 1:
     print('nt is an odd number. exit')
@@ -197,8 +191,6 @@ monoparameters_nt = {
     #"patch_sub_pc_factor_shift_type": "nonzero",
 }
 
-PETSc.Sys.Print('### === --- Calculating parallel solution --- === ###')
-
 # setup slice length
 slice_length_t = int(nt/args.nslices)
 assert(slice_length_t*args.nslices == nt)
@@ -247,15 +239,22 @@ ensemble_rank = ensemble.ensemble_comm.rank
 #some domain, parameters and FS setup
 R0 = 6371220.
 H0 = Constant(5960.)
-
 mesh_degree = 3
-mesh = IcosahedralSphereMesh(radius=R0,
-                             refinement_level=ref_level, degree=mesh_degree, comm=ensemble.comm)
-cx = SpatialCoordinate(mesh)
-mesh.init_cell_orientations(cx)
+
+if args.pickup:
+    # pickup the mesh when --pickup is specified
+    with CheckpointFile(name+".h5", 'r', comm=ensemble.comm) as checkpoint:
+        mesh = checkpoint.load_mesh("mesh")
+        print("Picked up the mesh from "+name+".h5")
+else:
+    # create mesh
+    mesh = IcosahedralSphereMesh(radius=R0, refinement_level=ref_level,
+                                 degree=mesh_degree, name="mesh", comm=ensemble.comm)
+    cx = SpatialCoordinate(mesh)
+    mesh.init_cell_orientations(cx)
+    print("Created mesh")
 
 cx, cy, cz = SpatialCoordinate(mesh)
-
 outward_normals = interpolate(CellNormal(mesh),VectorFunctionSpace(mesh,"DG",mesh_degree))
 DG2 = VectorFunctionSpace(mesh, "DG", 2)
 outward_normals_appx = Function(DG2).interpolate(outward_normals)
@@ -727,11 +726,11 @@ weights = weights/np.sum(weights)/2
 # double the 0 point again
 #weights[0] *= 2
 
-print(weights)
+print("weights = ", weights)
 weights_r = []
 for i in weights[::-1]:
-    weights_r.append(i)
-print(weights_r)
+    weights_r.append(float(i))
+#print(weights_r)
 
 offset_list = []
 for i_rank in range(len(time_partition_s)):
@@ -780,6 +779,8 @@ for ilocal in range(time_partition_s[ensemble_rank]):
     i = ns-iglobal-1
     assert(norm(Fall_new[ilocal] - i) < 1.e-06)
 
+
+### === --- Setup average() for averaging the nonlinearity in rk4 loop --- === ###
 V = Function(W)
 dVdt = Function(W)
 Average = Function(W)
@@ -1153,14 +1154,6 @@ def propagate(V_in, V_out, t=None, half=False):
         # copy contents
         V_out.assign(W1)
 
-t = 0.
-tmax = 60.*60.*args.tmax
-#tmax = dt
-dumpt = args.dumpt*60.*60.
-checkt = args.checkt*60.*60.
-tdump = 0.
-tcheck = 0.
-
 x = SpatialCoordinate(mesh)
 
 # Topography
@@ -1187,16 +1180,56 @@ if args.eta:
 else:
     Dn = Function(V2, name="Depth").interpolate(eta_expr + H - b)
 
+# set uini, etaini for debug
+uini = Function(V1, name="Velocity0").assign(un)
+etaini = Function(V2, name="Elevation0").assign(etan)
+Dnini = Function(V2, name="Dn0").assign(Dn)
+
+# set up parameters for time loop
+t = 0.
+tmax = 60.*60.*args.tmax
+#tmax = dt
+dumpt = args.dumpt*60.*60.
+checkt = args.checkt*60.*60.
+tdump = 0.
+tcheck = 0.
+idx = 0
+is_last_slice = Wall.layout.is_local(-1)
+
+# pickup the result when --pickup is specified
+if args.pickup:
+    with CheckpointFile(name+".h5", 'r', comm=ensemble.comm) as checkpoint:
+        timestepping_history = checkpoint.get_timestepping_history(mesh, name="Velocity")
+        idx = len(timestepping_history["index"]) - 1
+        print("Picking up the result from ", name+".h5,", "last index is", idx)
+        un = checkpoint.load_function(mesh, "Velocity", idx=idx)
+        etan = checkpoint.load_function(mesh, "Elevation", idx=idx)
+        t = timestepping_history["time"][-1]
+        tdump = timestepping_history["tdump"][-1]
+        tcheck = timestepping_history["tcheck"][-1]
+        print("Restart from t = ", t, ", tdump = ", tdump, ", tcheck = ", tcheck)
+    if args.eta:
+        Dn.assign(etan)
+    else:
+        Dn.assign(etan+H0-b)
+
 # set ubar
 if args.advection:
     # projection solve removes divergent parts
     u, p = TrialFunctions(W)
     w, q = TestFunctions(W)
+
+    if args.dynamic_ubar:
+        u_reference = un
+    else:
+        u_reference = uini
+
     eqn = (
         inner(w, u) - div(w)*p
-        + q*div(u+un)
+        + q*div(u+u_reference)
         )*dx
     Uproj = Function(W)
+
     projection_problem = LinearVariationalProblem(lhs(eqn), rhs(eqn), Uproj)
     v_basis = VectorSpaceBasis(constant=True, comm=COMM_WORLD)
     nullspace = MixedVectorSpaceBasis(W, [W.sub(0), v_basis])
@@ -1204,55 +1237,56 @@ if args.advection:
                                                 solver_parameters = hparams)
     projection_solver.solve()
     u, _ = Uproj.subfunctions
-    ubar.assign(un + u)
+    ubar.assign(u_reference + u)
 
-#pickup the result
-if args.pickup:
-    chkfile = DumbCheckpoint(args.pickup_from, mode=FILE_READ)
-    chkfile.load(un)
-    chkfile.load(etan)
-    t = chkfile.read_attribute("/", "time")
-    tdump = chkfile.read_attribute("/", "tdump")
-    tcheck = chkfile.read_attribute("/", "tcheck")
-    chkfile.close()
-    if args.eta:
-        Dn.assign(etan)
-    else:
-        Dn.assign(etan+H0-b)
-    if args.dynamic_ubar:
-        projection_solver.solve()
-        u, _ = Uproj.subfunctions
-        ubar.assign(un + u)
-
-# write out initial fields
-name = args.filename
-file_sw = output.VTKFile(name+'.pvd', mode="a")
-if not args.pickup:
-    file_sw.write(un, etan, b)
-
-# calculate norms for debug
-uini = Function(V1, name="Velocity0").project(u_expr)
-etaini = Function(V2, name="Elevation0").interpolate(eta_expr)
-etanorm = errornorm(etan, etaini)/norm(etaini)
-unorm = errornorm(un, uini, norm_type="Hdiv")/norm(uini, norm_type="Hdiv")
-print('etanorm', etanorm, 'unorm', unorm)
-
-
-##############################################################################
-# Debug before time loop
-##############################################################################
-
-# # set up initial conditions
-# U0 = Function(W)
-# U_u, U_D = U0.subfunctions
-# U_u.assign(un)
-# U_D.assign(Dn)
-
-# Vtest = Function(W).assign(U0)
+# set up PV solver for visualisation
+Vf = FunctionSpace(mesh, "CG", 3)
+PV = Function(Vf, name="PotentialVorticity")
+gamma = TestFunction(Vf)
+q = TrialFunction(Vf)
+Coriolis = Function(Vf).interpolate(f)
+a = q*gamma*(etan+H0-b)*dx
+L = (- inner(perp(grad(gamma)), un))*dx + gamma*Coriolis*dx
+PVproblem = LinearVariationalProblem(a, L, PV)
+PVsolver = LinearVariationalSolver(PVproblem, solver_parameters={"ksp_type": "cg"})
 
 ##############################################################################
 # Time loop
 ##############################################################################
+print('')
+print('### === --- Calculating parallel solution --- === ###')
+
+if is_last_slice:
+    file_sw = output.VTKFile(name+'.pvd', mode="a", comm=ensemble.comm)
+
+if not args.pickup:
+    if is_last_slice:
+        # dump initial condition when --pickup is not specified
+        PVsolver.solve()
+        file_sw.write(un, etan, PV, b)
+
+        # create checkpoint file and save initial condition
+        with CheckpointFile(name+".h5", 'w', comm=ensemble.comm) as checkpoint:
+            checkpoint.save_mesh(mesh)
+            checkpoint.save_function(b)
+            checkpoint.save_function(un, idx=idx, timestepping_info={
+                "time": t, "tdump": tdump, "tcheck": tcheck})
+            checkpoint.save_function(etan, idx=idx, timestepping_info={
+                "time": t, "tdump": tdump, "tcheck": tcheck})
+            checkpoint.save_function(PV, idx=idx, timestepping_info={
+                "time": t, "tdump": tdump, "tcheck": tcheck})
+            print("Checkpointed at t = ", t, "idx = ", idx, comm=ensemble.comm)
+
+# calculate norms for debug
+etanorm = errornorm(etan, etaini)/norm(etaini)
+unorm = errornorm(un, uini, norm_type="Hdiv")/norm(uini, norm_type="Hdiv")
+print('etanorm', etanorm, 'unorm', unorm)
+
+# initial mass to calculate mass error for debug
+mass0 = assemble(Dnini*dx)
+print('initial mass', mass0)
+
+# setup variables to store intermidiate data
 U0 = Function(W)
 U1 = Function(W)
 U2 = Function(W)
@@ -1268,13 +1302,10 @@ U1_u, U1_D = U1.subfunctions
 U_u.assign(un)
 U_D.assign(Dn)
 
-mass0 = assemble(U_D*dx)
-
-
-#start time loop
-print ('tmax', tmax, 'dt', dt)
+### === --- start time loop --- === ###
+print("Sarting the time loop. tmax = ", tmax)
 while t < tmax - 0.5*dt:
-    print(t)
+    print("At the start of time step at t = ", t, ", dt = ", dt, ", tmax = ", tmax)
     t += dt
     tdump += dt
     tcheck += dt
@@ -1355,40 +1386,88 @@ while t < tmax - 0.5*dt:
         propagate(U0, V, t=t)
         U0.assign(V + 1/6*U1 + 1/3*U2 + 1/6*U3)
 
-    if args.dynamic_ubar:
-        projection_solver.solve()
-        u, _ = Uproj.subfunctions
-        ubar.assign(un + u)
     print("mass error", (mass0-assemble(U_D*dx))/Area)
 
-    #calculate norms for debug (every time step)
     un.assign(U_u)
     Dn.assign(U_D)
     if args.eta:
         etan.assign(Dn)
     else:
         etan.assign(Dn-H0+b)
+
+    #calculate norms for debug (every time step)
     etanorm = errornorm(etan, etaini)/norm(etaini)
     unorm = errornorm(un, uini, norm_type="Hdiv")/norm(uini, norm_type="Hdiv")
     print('etanorm', etanorm, 'unorm', unorm)
 
+    #update ubar (every time step)
+    if args.dynamic_ubar:
+        projection_solver.solve()
+        u, _ = Uproj.subfunctions
+        ubar.assign(un + u)
+
     #dump results every tdump hours
     if tdump > dumpt - dt*0.5:
-        file_sw.write(un, etan, b)
+        if is_last_slice:
+            PVsolver.solve()
+            file_sw.write(un, etan, PV, b)
         tdump -= dumpt
         print("dumped results at t =", t)
 
-    #create checkpointing file every tcheck hours
+    #checkpointing every tcheck hours
     if tcheck > checkt - dt*0.5:
-        thours = int(t/3600)
-        chk = DumbCheckpoint(name+"_"+str(thours)+"h", mode=FILE_CREATE)
         tcheck -= checkt
-        chk.store(un)
-        chk.store(etan)
-        chk.write_attribute("/", "time", t)
-        chk.write_attribute("/", "tdump", tdump)
-        chk.write_attribute("/", "tcheck", tcheck)
-        chk.close()
-        print("checkpointed at t =", t)
+        idx += 1
+        if is_last_slice:
+            PVsolver.solve()
+            with CheckpointFile(name+".h5", 'a', comm=ensemble.comm) as checkpoint:
+                checkpoint.save_function(un, idx=idx, timestepping_info={
+                    "time": t, "tdump": tdump, "tcheck": tcheck})
+                checkpoint.save_function(etan, idx=idx, timestepping_info={
+                    "time": t, "tdump": tdump, "tcheck": tcheck})
+                checkpoint.save_function(PV, idx=idx, timestepping_info={
+                    "time": t, "tdump": tdump, "tcheck": tcheck})
+        print("Checkpointed at t = ", t, "idx = ", idx)
 
 print("Completed calculation at t = ", t/3600, "hours")
+
+### === --- Test checkpoint file for debug --- === ###
+print('')
+print('### === --- Test Checkpointing --- === ###')
+
+#print out testc, etanorm, unorm at the end of the calculation
+testc = assemble(dot(un,un)*dx)
+print("testc = ", testc)
+etanorm = errornorm(etan, etaini)/norm(etaini)
+unorm = errornorm(un, uini, norm_type="Hdiv")/norm(uini, norm_type="Hdiv")
+print('etanorm', etanorm, 'unorm', unorm)
+
+ensemble.global_comm.Barrier()
+
+#print out timestepping history in the checkpoint file for debug
+with CheckpointFile(name+".h5", 'r', comm=ensemble.comm) as checkpoint:
+    mesh = checkpoint.load_mesh("mesh")
+    timestepping_history = checkpoint.get_timestepping_history(mesh, name="Velocity")
+    print("timestepping_history=", timestepping_history)
+    print("timestepping_history_index=", timestepping_history["index"])
+    print("timestepping_history_time=", timestepping_history["time"])
+    print("timestepping_history_tdump=", timestepping_history["tdump"])
+    print("timestepping_history_tcheck=", timestepping_history["tcheck"])
+    print("timestepping_history_index_last=", timestepping_history["index"][-1])
+    print("timestepping_history_time_last=", timestepping_history["time"][-1])
+    print("timestepping_history_tdump_last=", timestepping_history["tdump"][-1])
+    print("timestepping_history_tcheck_last=", timestepping_history["tcheck"][-1])
+
+    uini = checkpoint.load_function(mesh, "Velocity", idx=0)
+    etaini = checkpoint.load_function(mesh, "Elevation", idx=0)
+    for i in range(len(timestepping_history["time"])):
+        un = checkpoint.load_function(mesh, "Velocity", idx=i)
+        etan = checkpoint.load_function(mesh, "Elevation", idx=i)
+        print("Picked up at idx = ", i)
+
+        testc = assemble(dot(un,un)*dx)
+        print("testc = ", testc)
+
+        etanorm = errornorm(etan, etaini)/norm(etaini)
+        unorm = errornorm(un, uini, norm_type="Hdiv")/norm(uini, norm_type="Hdiv")
+        print('etanorm', etanorm, 'unorm', unorm)
