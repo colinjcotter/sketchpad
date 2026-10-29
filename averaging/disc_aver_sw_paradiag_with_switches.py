@@ -60,6 +60,17 @@ paradiag_X = args.paradiag_X
 paradiag_X_halo = args.paradiag_X_halo
 paradiag_X_shift = args.paradiag_X_shift
 
+serial_only = not any((
+    paradiag_dt,
+    paradiag_fs,
+    paradiag_n,
+    paradiag_backward_n,
+    paradiag_nf,
+    paradiag_X,
+    paradiag_X_halo,
+    paradiag_X_shift,
+))
+
 if paradiag_backward_n:
     assert paradiag_X, \
         "--paradiag_backward_n requires --paradiag_X"
@@ -790,7 +801,7 @@ if paradiag_backward_n:
     W_backward_serial = [Function(W) for _ in range(ns)]
 
 def average(V, Average, t=None):
-    if paradiag_X_shift:
+    if paradiag_X_shift or serial_only:
         get_dVdt(V, dVdt, positive=True, t=t)
         Average.assign(dt*dVdt)
         get_dVdt(V, dVdt, positive=False, t=t)
@@ -1096,7 +1107,12 @@ def get_dVdt(V, dVdt, positive=True, t=None):
         # solve backward process in serial without paradiag
         X1.assign(0.)
 
-        for step in ProgressBar(f'average backward').iter(range(ns, 0, -1)):
+        if serial_only:
+            nend = -1
+        else:
+            nend = 0
+
+        for step in ProgressBar(f'average backward').iter(range(ns, nend, -1)):
 
             # compute N
             with PETSc.Log.Event("nonlinearity"):
