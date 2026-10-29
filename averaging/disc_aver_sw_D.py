@@ -173,6 +173,9 @@ if args.advection:
     F0p += dt_ss*advection(Dh, ubar, phi, vector=False,
                            continuity=True, upwind=False)
 
+uh = (u0 + u)/2
+Dh = (D0 + D)/2
+
 dt_ss = -dt_s
 # negative s outward  propagation
 F1m = (
