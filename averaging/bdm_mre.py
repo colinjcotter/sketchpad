@@ -35,16 +35,27 @@ elevation_original = assemble(etan * etan * dx)
 # Save checkpoint
 filename = "bdm_mre.h5"
 
+Vflat = VectorFunctionSpace(mesh, "CG", 1)
+Xflat = Function(Vflat).interpolate(mesh.coordinates)
+Xflat3 = Function(mesh.coordinates.function_space()).interpolate(Xflat)
+X3 = Function(mesh.coordinates.function_space(),name="coordinates").interpolate(mesh.coordinates)
+
+mesh.coordinates.assign(Xflat3)
+
 with CheckpointFile(filename, "w") as checkpoint:
     checkpoint.save_mesh(mesh)
     checkpoint.save_function(un)
     checkpoint.save_function(etan)
+    checkpoint.save_function(X3)
 
 # Load checkpoint
 with CheckpointFile(filename, "r") as checkpoint:
     mesh_loaded = checkpoint.load_mesh("mesh")
     un_loaded = checkpoint.load_function(mesh_loaded, "Velocity")
     etan_loaded = checkpoint.load_function(mesh_loaded, "Elevation")
+    X3_loaded = checkpoint.load_function(mesh_loaded, "coordinates")
+
+mesh_loaded.coordinates.assign(X3_loaded)
 
 # Loaded integrals
 velocity_loaded = assemble(dot(un_loaded, un_loaded) * dx)
